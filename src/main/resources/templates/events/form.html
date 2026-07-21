@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/common :: head('Event')}"></head>
+<body>
+<header th:replace="~{fragments/common :: topbar}"></header>
+<main class="container">
+    <div class="page-head">
+        <h1 th:text="${id != null} ? 'Edit event' : 'New event'">Event</h1>
+        <a th:href="@{/events}" class="btn secondary">Back</a>
+    </div>
+
+    <div th:if="${error}" class="alert error" th:text="${error}"></div>
+
+    <div class="card">
+        <form th:object="${event}" method="post"
+              th:action="${id != null} ? @{/events/{id}(id=${id})} : @{/events}">
+            <div class="field">
+                <label for="name">Name</label>
+                <input type="text" id="name" th:field="*{name}"/>
+                <div class="err" th:if="${#fields.hasErrors('name')}" th:errors="*{name}">error</div>
+            </div>
+            <div class="field">
+                <label for="description">Description</label>
+                <textarea id="description" rows="3" th:field="*{description}"></textarea>
+            </div>
+            <div class="row">
+                <div class="field">
+                    <label for="category">Category</label>
+                    <input type="text" id="category" th:field="*{category}"/>
+                </div>
+                <div class="field">
+                    <label for="maxCapacity">Max capacity</label>
+                    <input type="number" id="maxCapacity" th:field="*{maxCapacity}" min="1"/>
+                    <div class="err" th:if="${#fields.hasErrors('maxCapacity')}" th:errors="*{maxCapacity}">error</div>
+                </div>
+            </div>
+            <div class="row">
+                <div class="field">
+                    <label for="startAt">Starts (UTC)</label>
+                    <input type="datetime-local" id="startAt" th:field="*{startAt}"/>
+                    <div class="err" th:if="${#fields.hasErrors('startAt')}" th:errors="*{startAt}">error</div>
+                </div>
+                <div class="field">
+                    <label for="endAt">Ends (UTC)</label>
+                    <input type="datetime-local" id="endAt" th:field="*{endAt}"/>
+                    <div class="err" th:if="${#fields.hasErrors('endAt')}" th:errors="*{endAt}">error</div>
+                </div>
+            </div>
+            <div class="row">
+                <div class="field">
+                    <label for="organizerId">Organizer</label>
+                    <select id="organizerId" th:field="*{organizerId}">
+                        <option value="">— select —</option>
+                        <option th:each="o : ${organizers}" th:value="${o.id()}" th:text="${o.name()}">Org</option>
+                    </select>
+                    <div class="err" th:if="${#fields.hasErrors('organizerId')}" th:errors="*{organizerId}">error</div>
+                </div>
+                <div class="field">
+                    <label for="hallId">Hall</label>
+                    <select id="hallId" th:field="*{hallId}">
+                        <option value="">— select —</option>
+                        <option th:each="h : ${halls}" th:value="${h.id()}"
+                                th:text="${h.name()} + (${h.seated()} ? ' (seated)' : ' (GA)')">Hall</option>
+                    </select>
+                    <div class="err" th:if="${#fields.hasErrors('hallId')}" th:errors="*{hallId}">error</div>
+                </div>
+            </div>
+            <button type="submit" class="btn">Save event</button>
+        </form>
+    </div>
+</main>
+</body>
+</html>

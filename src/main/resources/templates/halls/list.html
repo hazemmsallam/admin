@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/common :: head('Halls')}"></head>
+<body>
+<header th:replace="~{fragments/common :: topbar}"></header>
+<main class="container">
+    <div th:replace="~{fragments/common :: flash}"></div>
+    <div class="page-head">
+        <h1>Halls</h1>
+        <a th:href="@{/halls/new}" class="btn">New hall</a>
+    </div>
+
+    <table>
+        <thead>
+        <tr><th>Name</th><th>Address</th><th>Capacity</th><th>Type</th><th></th></tr>
+        </thead>
+        <tbody>
+        <tr th:each="h : ${halls}">
+            <td><a th:href="@{/halls/{id}(id=${h.id()})}" th:text="${h.name()}">Name</a></td>
+            <td th:text="${h.address()}">address</td>
+            <td th:text="${h.capacity()}">0</td>
+            <td th:text="${h.seated()} ? 'Seated' : 'General admission'">type</td>
+            <td class="actions">
+                <a th:href="@{/halls/{id}(id=${h.id()})}" class="btn secondary small">View</a>
+                <a th:href="@{/halls/{id}/edit(id=${h.id()})}" class="btn secondary small">Edit</a>
+                <form class="inline" th:action="@{/halls/{id}/delete(id=${h.id()})}" method="post"
+                      onsubmit="return confirm('Delete this hall?');">
+                    <button type="submit" class="btn danger small">Delete</button>
+                </form>
+            </td>
+        </tr>
+        <tr th:if="${#lists.isEmpty(halls)}">
+            <td colspan="5" class="muted">No halls yet.</td>
+        </tr>
+        </tbody>
+    </table>
+</main>
+</body>
+</html>

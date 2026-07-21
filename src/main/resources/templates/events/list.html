@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/common :: head('Events')}"></head>
+<body>
+<header th:replace="~{fragments/common :: topbar}"></header>
+<main class="container">
+    <div th:replace="~{fragments/common :: flash}"></div>
+    <div class="page-head">
+        <h1>Events</h1>
+        <a th:href="@{/events/new}" class="btn">New event</a>
+    </div>
+
+    <table>
+        <thead>
+        <tr><th>Name</th><th>Category</th><th>Starts</th><th>Hall</th><th>Status</th><th></th></tr>
+        </thead>
+        <tbody>
+        <tr th:each="e : ${events}">
+            <td><a th:href="@{/events/{id}(id=${e.id()})}" th:text="${e.name()}">Name</a></td>
+            <td th:text="${e.category()}">cat</td>
+            <td th:text="${e.startAt() != null ? #strings.replace(#strings.substring(e.startAt().toString(),0,16),'T',' ') : ''}">start</td>
+            <td th:text="${e.hallName()}">hall</td>
+            <td><span class="badge" th:classappend="${e.status()}" th:text="${e.status()}">STATUS</span></td>
+            <td class="actions">
+                <a th:href="@{/events/{id}(id=${e.id()})}" class="btn secondary small">Manage</a>
+            </td>
+        </tr>
+        <tr th:if="${#lists.isEmpty(events)}">
+            <td colspan="6" class="muted">No events yet.</td>
+        </tr>
+        </tbody>
+    </table>
+</main>
+</body>
+</html>

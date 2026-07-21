@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/common :: head('Hall')}"></head>
+<body>
+<header th:replace="~{fragments/common :: topbar}"></header>
+<main class="container">
+    <div th:replace="~{fragments/common :: flash}"></div>
+    <div class="page-head">
+        <h1 th:text="${hall.name()}">Hall</h1>
+        <div>
+            <a th:href="@{/halls/{id}/edit(id=${hall.id()})}" class="btn secondary">Edit</a>
+            <a th:href="@{/halls}" class="btn secondary">Back</a>
+        </div>
+    </div>
+
+    <div class="card">
+        <p><strong>Address:</strong> <span th:text="${hall.address()} ?: '—'">—</span></p>
+        <p><strong>Capacity:</strong> <span th:text="${hall.capacity()}">0</span></p>
+        <p><strong>Type:</strong> <span th:text="${hall.seated()} ? 'Seated' : 'General admission'">type</span></p>
+        <p th:if="${hall.seated()}"><strong>Layout:</strong>
+            <span th:text="${hall.numRows()} + ' rows × ' + ${hall.numColumns()} + ' columns'">grid</span></p>
+    </div>
+
+    <section class="layout-panel mt" th:if="${hall.seated()}">
+        <div class="layout-toolbar">
+            <div>
+                <h2>Seat layout</h2>
+                <p class="muted" th:text="${hall.seats().size()} + ' seats across ' + ${hall.numRows()} + ' rows'">
+                    40 seats across 5 rows
+                </p>
+            </div>
+            <div class="layout-legend" aria-label="Seat type legend">
+                <span><i class="seat-dot VIP"></i>VIP</span>
+                <span><i class="seat-dot PREMIUM"></i>Premium</span>
+                <span><i class="seat-dot REGULAR"></i>Regular</span>
+            </div>
+        </div>
+
+        <div class="layout-actions">
+            <button type="button" id="btnEdit" class="btn small">Edit layout</button>
+            <button type="button" id="btnSave" class="btn small hidden">Save layout</button>
+            <button type="button" id="btnCancel" class="btn secondary small hidden">Cancel</button>
+            <span id="layoutStatus" class="layout-status"></span>
+        </div>
+
+        <div class="layout-tools hidden" id="layoutTools">
+            <button type="button" id="btnAddRow" class="btn secondary small">+ Row</button>
+            <button type="button" id="btnAddCol" class="btn secondary small">+ Column</button>
+            <button type="button" id="btnAddSeat" class="btn secondary small">+ Seat</button>
+            <span class="tools-sep"></span>
+            <button type="button" id="btnDelSeat" class="btn danger small">Delete seat(s)</button>
+            <button type="button" id="btnDelRow" class="btn danger small">Delete row</button>
+            <button type="button" id="btnDelCol" class="btn danger small">Delete column</button>
+        </div>
+
+        <div class="layout-tools hidden" id="arrangeTools">
+            <span class="tools-label">Align</span>
+            <button type="button" id="alLeft" class="btn secondary small">Left</button>
+            <button type="button" id="alCenterX" class="btn secondary small">Center</button>
+            <button type="button" id="alRight" class="btn secondary small">Right</button>
+            <button type="button" id="alTop" class="btn secondary small">Top</button>
+            <button type="button" id="alMiddle" class="btn secondary small">Middle</button>
+            <button type="button" id="alBottom" class="btn secondary small">Bottom</button>
+            <span class="tools-sep"></span>
+            <span class="tools-label">Distribute</span>
+            <button type="button" id="distH" class="btn secondary small">Across</button>
+            <button type="button" id="distV" class="btn secondary small">Down</button>
+            <span class="tools-sep"></span>
+            <button type="button" id="snapGrid" class="btn secondary small">Snap to grid</button>
+            <button type="button" id="straighten" class="btn secondary small">Straighten</button>
+            <span class="tools-sep"></span>
+            <span class="tools-label">Rotate group</span>
+            <input type="number" id="groupRotStep" value="15" min="1" max="180" title="Degrees per step"/>
+            <button type="button" id="rotCCW" class="btn secondary small" title="Rotate counter-clockwise">⟲</button>
+            <button type="button" id="rotCW" class="btn secondary small" title="Rotate clockwise">⟳</button>
+            <span class="tools-sep"></span>
+            <span class="tools-label">Curve</span>
+            <input type="number" id="curveAmt" value="40" min="1" max="400" title="Curve depth (px)"/>
+            <button type="button" id="curveUp" class="btn secondary small" title="Bow the row upward">Up</button>
+            <button type="button" id="curveDown" class="btn secondary small" title="Bow the row downward">Down</button>
+            <button type="button" id="curveLeft" class="btn secondary small" title="Bow the column left">Left</button>
+            <button type="button" id="curveRight" class="btn secondary small" title="Bow the column right">Right</button>
+        </div>
+
+        <div class="inspector hidden" id="inspector">
+            <div>
+                <label>Selection</label>
+                <div class="sel-label" id="selLabel">—</div>
+            </div>
+            <div>
+                <label>Seat type</label>
+                <div class="type-seg" id="typeSeg">
+                    <button type="button" data-type="VIP">VIP</button>
+                    <button type="button" data-type="PREMIUM">Premium</button>
+                    <button type="button" data-type="REGULAR">Regular</button>
+                </div>
+            </div>
+            <div>
+                <label for="inSection">Section name</label>
+                <input type="text" id="inSection" maxlength="80" placeholder="e.g. Left wing"/>
+            </div>
+            <div>
+                <label for="inRotation">Rotation <span id="rotVal">0</span>°</label>
+                <input type="range" id="inRotation" min="-180" max="180" step="1" value="0"/>
+            </div>
+            <div>
+                <label for="inWidth">Width (px)</label>
+                <input type="number" id="inWidth" min="12" max="120" step="1" value="42"/>
+            </div>
+            <div>
+                <label for="inHeight">Height (px)</label>
+                <input type="number" id="inHeight" min="12" max="120" step="1" value="38"/>
+            </div>
+        </div>
+
+        <p class="muted layout-hint" id="layoutHint"></p>
+
+        <div class="seat-canvas-shell">
+            <div class="seat-canvas" id="seatCanvas"
+                 th:attr="data-w=${hall.layoutWidth()}, data-h=${hall.layoutHeight()},
+                          data-seats-url=@{/halls/{id}/seats(id=${hall.id()})}, data-cols=${hall.numColumns()}">
+                <div class="stage-abs">Stage</div>
+                <span th:each="s : ${hall.seats()}"
+                      class="seat-chip"
+                      th:classappend="${s.seatType()}"
+                      th:attr="data-id=${s.id()}, data-type=${s.seatType()},
+                               data-x=${s.layoutX()}, data-y=${s.layoutY()},
+                               data-w=${s.layoutWidth()}, data-h=${s.layoutHeight()},
+                               data-rot=${s.rotationDegrees()}, data-section=${s.sectionName()},
+                               data-row=${s.rowIndex()}, data-col=${s.seatNumber()},
+                               data-label=${s.label()}, data-rowlabel=${s.rowLabel()}"
+                      th:title="|${s.label()} - ${s.seatType()}|"
+                      th:text="${s.label()}">A1</span>
+            </div>
+        </div>
+    </section>
+</main>
+<script th:src="@{/js/seat-layout.js}"></script>
+</body>
+</html>

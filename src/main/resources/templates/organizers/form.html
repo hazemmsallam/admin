@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/common :: head('Organizer')}"></head>
+<body>
+<header th:replace="~{fragments/common :: topbar}"></header>
+<main class="container">
+    <div class="page-head">
+        <h1 th:text="${mode == 'edit'} ? 'Edit organizer' : 'New organizer'">Organizer</h1>
+        <a th:href="@{/organizers}" class="btn secondary">Back</a>
+    </div>
+
+    <div th:if="${error}" class="alert error" th:text="${error}"></div>
+
+    <div class="card">
+        <form th:object="${organizer}" method="post"
+              th:action="${mode == 'edit'} ? @{/organizers/{id}(id=${id})} : @{/organizers}">
+            <div class="field">
+                <label for="name">Name</label>
+                <input type="text" id="name" th:field="*{name}"/>
+                <div class="err" th:if="${#fields.hasErrors('name')}" th:errors="*{name}">error</div>
+            </div>
+            <div class="row">
+                <div class="field">
+                    <label for="email">Email</label>
+                    <input type="email" id="email" th:field="*{email}"/>
+                    <div class="err" th:if="${#fields.hasErrors('email')}" th:errors="*{email}">error</div>
+                </div>
+                <div class="field">
+                    <label for="phone">Phone</label>
+                    <input type="text" id="phone" th:field="*{phone}"/>
+                </div>
+            </div>
+            <button type="submit" class="btn">Save</button>
+        </form>
+    </div>
+</main>
+</body>
+</html>

@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/common :: head('Pricing')}"></head>
+<body>
+<header th:replace="~{fragments/common :: topbar}"></header>
+<main class="container">
+    <div class="page-head">
+        <h1>Pricing — <span th:text="${event.name()}">Event</span></h1>
+        <a th:href="@{/events/{id}(id=${event.id()})}" class="btn secondary">Back</a>
+    </div>
+
+    <div th:if="${error}" class="alert error" th:text="${error}"></div>
+
+    <div class="card">
+        <form th:object="${pricing}" method="post" th:action="@{/events/{id}/pricing(id=${event.id()})}">
+            <div th:if="${event.hall() != null and event.hall().seated()}">
+                <p class="muted">Enter a price for each seat type the hall uses. Leave a type blank if it isn't present.</p>
+                <div class="row">
+                    <div class="field"><label>VIP price</label><input type="number" step="0.01" min="0" th:field="*{vipPrice}"/></div>
+                    <div class="field"><label>Premium price</label><input type="number" step="0.01" min="0" th:field="*{premiumPrice}"/></div>
+                    <div class="field"><label>Regular price</label><input type="number" step="0.01" min="0" th:field="*{regularPrice}"/></div>
+                </div>
+            </div>
+            <div th:unless="${event.hall() != null and event.hall().seated()}">
+                <p class="muted">General-admission event — set a single admission price.</p>
+                <div class="field" style="max-width:240px">
+                    <label>General admission price</label>
+                    <input type="number" step="0.01" min="0" th:field="*{generalPrice}"/>
+                </div>
+            </div>
+            <button type="submit" class="btn">Save pricing</button>
+        </form>
+    </div>
+</main>
+</body>
+</html>

@@ -1,0 +1,25 @@
+spring:
+  application:
+    name: admin
+  thymeleaf:
+    cache: true
+  jackson:
+    deserialization:
+      fail-on-unknown-properties: false
+
+server:
+  port: ${SERVER_PORT:8091}
+
+# Single admin login (basic username/password).
+admin:
+  username: ${ADMIN_USERNAME:admin}
+  password: ${ADMIN_PASSWORD:admin123}
+
+# Base URL of the event-ticketing API this console manages.
+# Docker event-ticketing => http://localhost:8090 ; host/STS run => http://localhost:8089
+ticketing:
+  base-url: ${TICKETING_BASE_URL:http://localhost:8089}
+
+logging:
+  level:
+    com.eventticketing.admin: debug

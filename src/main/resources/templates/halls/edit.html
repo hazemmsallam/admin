@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/common :: head('Edit hall')}"></head>
+<body>
+<header th:replace="~{fragments/common :: topbar}"></header>
+<main class="container">
+    <div class="page-head">
+        <h1>Edit hall</h1>
+        <a th:href="@{/halls}" class="btn secondary">Back</a>
+    </div>
+
+    <div th:if="${error}" class="alert error" th:text="${error}"></div>
+
+    <div class="card">
+        <p class="muted">This form edits the hall's name and address. To rearrange seats visually, open the hall and use the seat-layout editor.</p>
+        <form th:object="${hall}" method="post" th:action="@{/halls/{id}(id=${id})}">
+            <div class="field">
+                <label for="name">Name</label>
+                <input type="text" id="name" th:field="*{name}"/>
+                <div class="err" th:if="${#fields.hasErrors('name')}" th:errors="*{name}">error</div>
+            </div>
+            <div class="field">
+                <label for="address">Address</label>
+                <input type="text" id="address" th:field="*{address}"/>
+            </div>
+            <button type="submit" class="btn">Save</button>
+        </form>
+    </div>
+</main>
+</body>
+</html>

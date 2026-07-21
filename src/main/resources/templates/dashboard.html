@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/common :: head('Dashboard')}"></head>
+<body>
+<header th:replace="~{fragments/common :: topbar}"></header>
+<main class="container">
+    <div th:replace="~{fragments/common :: flash}"></div>
+    <div class="page-head"><h1>Dashboard</h1></div>
+
+    <div class="card">
+        <div class="stat-grid">
+            <a class="stat" th:href="@{/organizers}">
+                <div class="num" th:text="${organizerCount}">0</div>
+                <div class="label">Organizers</div>
+            </a>
+            <a class="stat" th:href="@{/halls}">
+                <div class="num" th:text="${hallCount}">0</div>
+                <div class="label">Halls</div>
+            </a>
+            <a class="stat" th:href="@{/events}">
+                <div class="num" th:text="${eventCount}">0</div>
+                <div class="label">Events</div>
+            </a>
+        </div>
+    </div>
+
+    <div class="card mt">
+        <h2 style="margin-top:0;font-size:1.05rem">Quick actions</h2>
+        <a th:href="@{/organizers/new}" class="btn secondary">New organizer</a>
+        <a th:href="@{/halls/new}" class="btn secondary">New hall</a>
+        <a th:href="@{/events/new}" class="btn secondary">New event</a>
+    </div>
+</main>
+</body>
+</html>

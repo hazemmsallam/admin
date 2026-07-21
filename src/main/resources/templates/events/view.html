@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/common :: head('Event')}"></head>
+<body>
+<header th:replace="~{fragments/common :: topbar}"></header>
+<main class="container">
+    <div th:replace="~{fragments/common :: flash}"></div>
+    <div class="page-head">
+        <h1 th:text="${event.name()}">Event</h1>
+        <div>
+            <a th:href="@{/events/{id}/edit(id=${event.id()})}" class="btn secondary">Edit</a>
+            <a th:href="@{/events/{id}/pricing(id=${event.id()})}" class="btn secondary">Pricing</a>
+            <form class="inline" th:action="@{/events/{id}/delete(id=${event.id()})}" method="post"
+                  onsubmit="return confirm('Delete this event?');">
+                <button type="submit" class="btn danger">Delete</button>
+            </form>
+        </div>
+    </div>
+
+    <div class="card">
+        <p><strong>Status:</strong> <span class="badge" th:classappend="${event.status()}" th:text="${event.status()}">STATUS</span></p>
+        <p><strong>Category:</strong> <span th:text="${event.category()}">cat</span></p>
+        <p><strong>Description:</strong> <span th:text="${event.description()}">desc</span></p>
+        <p><strong>Starts:</strong> <span th:text="${event.startAt()}">start</span></p>
+        <p><strong>Ends:</strong> <span th:text="${event.endAt()}">end</span></p>
+        <p><strong>Max capacity:</strong> <span th:text="${event.maxCapacity()}">0</span></p>
+        <p><strong>Organizer:</strong> <span th:text="${event.organizer() != null ? event.organizer().name() : '—'}">org</span></p>
+        <p><strong>Hall:</strong>
+            <a th:if="${event.hall() != null}" th:href="@{/halls/{id}(id=${event.hall().id()})}"
+               th:text="${event.hall().name()} + (${event.hall().seated()} ? ' (seated)' : ' (GA)')">hall</a>
+        </p>
+    </div>
+
+    <div class="card mt">
+        <h2 style="margin-top:0;font-size:1.05rem">Change status</h2>
+        <form th:action="@{/events/{id}/status(id=${event.id()})}" method="post" style="display:flex;gap:10px;align-items:center">
+            <select name="status" class="field" style="width:auto;margin:0">
+                <option th:each="s : ${statuses}" th:value="${s}" th:text="${s}" th:selected="${s == event.status()}">S</option>
+            </select>
+            <button type="submit" class="btn">Apply</button>
+        </form>
+        <p class="muted" style="margin-bottom:0">Publishing requires complete pricing for every seat type (or a general-admission price).</p>
+    </div>
+
+    <div class="card mt">
+        <h2 style="margin-top:0;font-size:1.05rem">Pricing</h2>
+        <table th:if="${event.pricing() != null and !#lists.isEmpty(event.pricing())}">
+            <thead><tr><th>Seat type</th><th>Price</th></tr></thead>
+            <tbody>
+            <tr th:each="p : ${event.pricing()}">
+                <td><span class="badge" th:classappend="${p.seatType()} ?: 'REGULAR'"
+                          th:text="${p.seatType()} ?: 'General admission'">type</span></td>
+                <td th:text="${p.price()}">0.00</td>
+            </tr>
+            </tbody>
+        </table>
+        <p th:if="${event.pricing() == null or #lists.isEmpty(event.pricing())}" class="muted">
+            No pricing set. <a th:href="@{/events/{id}/pricing(id=${event.id()})}">Set pricing</a>.
+        </p>
+    </div>
+</main>
+</body>
+</html>
