@@ -5,6 +5,8 @@
  * Edit mode:
  *   - drag seats to reposition (multiple selected seats move together);
  *   - shift-click to add/remove seats from the selection;
+ *   - drag on empty canvas space to marquee-select seats;
+ *   - generate collision-checked rectangular seat blocks;
  *   - assign VIP / Premium / Regular, rotation, size and section;
  *   - add/remove rows, columns and individual seats;
  *   - Save POSTs the full desired seat set to /halls/{id}/seats, which the backend reconciles
@@ -19,6 +21,8 @@
     }
 
     var GAP_X = 58, GAP_Y = 52, DEF_W = 42, DEF_H = 38, START_X = 70, START_Y = 150;
+    var LAYOUT_MARGIN = 24, STAGE_CLEAR_BOTTOM = 118, PLACEMENT_CLEARANCE = 6;
+    var MAX_BULK_SEATS = 500, CANVAS_GROW_STEP = 120;
     var TYPES = { VIP: 1, PREMIUM: 1, REGULAR: 1 };
 
     var W = int(canvas.dataset.w, 900);
@@ -36,7 +40,15 @@
     var statusEl = document.getElementById("layoutStatus");
     var hintEl = document.getElementById("layoutHint");
     var tools = document.getElementById("layoutTools");
+    var bulkGridTools = document.getElementById("bulkGridTools");
     var arrangeTools = document.getElementById("arrangeTools");
+    var gridColumns = document.getElementById("gridColumns");
+    var gridRows = document.getElementById("gridRows");
+    var gridGapX = document.getElementById("gridGapX");
+    var gridGapY = document.getElementById("gridGapY");
+    var gridFitSummary = document.getElementById("gridFitSummary");
+    var btnAddGrid = document.getElementById("btnAddGrid");
+    var hall3dHost = document.getElementById("hall3dCanvas");
     var inspector = document.getElementById("inspector");
     var selLabel = document.getElementById("selLabel");
     var typeSeg = document.getElementById("typeSeg");
@@ -51,6 +63,10 @@
     var selection = [];
     var primary = null;
     var structureChanged = false; // seats added/removed -> Cancel must reload
+    var bridgeListeners = [];
+    var nextDraftKey = 1;
+    var marquee = null;
+    var marqueeFrame = null;
 
     // --- Initialise seat state from data attributes and render ---------------
     chips.forEach(function (el) {
@@ -68,13 +84,16 @@
             section: el.dataset.section || "",
             type: TYPES[el.dataset.type] ? el.dataset.type : "REGULAR"
         };
+        ensureSeatKey(el._st);
         if (!el._st.rowLabel) { el._st.rowLabel = letter(el._st.r); }
         clampPosition(el);
         render(el);
         el.addEventListener("pointerdown", onSeatPointerDown);
     });
 
+    ensureCanvasFits(chips.map(function (el) { return el._st; }));
     var savedState = chips.map(function (el) { return copy(el._st); });
+    var savedCanvas = { width: W, height: H };
 
     if (new URLSearchParams(window.location.search).get("edit") === "true") {
         setEditing(true);
@@ -99,8 +118,8 @@
 
     function clampPosition(el) {
         var s = el._st;
-        s.x = clamp(s.x, 0, Math.max(0, W - s.w));
-        s.y = clamp(s.y, 0, Math.max(0, H - s.h));
+        s.x = Math.max(0, s.x);
+        s.y = Math.max(0, s.y);
     }
 
     // --- Selection -----------------------------------------------------------
@@ -110,6 +129,15 @@
         primary = list.length ? list[list.length - 1] : null;
         chips.forEach(render);
         refreshInspector();
+        notifyBridge("selection");
+    }
+    function setSelectionIfChanged(list) {
+        if (list.length === selection.length && list.every(function (el) {
+            return selection.indexOf(el) !== -1;
+        })) {
+            return;
+        }
+        setSelection(list);
     }
     function toggleInSelection(el) {
         var i = selection.indexOf(el);
@@ -117,8 +145,10 @@
         else { selection.splice(i, 1); primary = selection.length ? selection[selection.length - 1] : null; }
         chips.forEach(render);
         refreshInspector();
+        notifyBridge("selection");
     }
     function refreshInspector() {
+        refreshGridCapacity();
         if (!selection.length) { inspector.classList.add("hidden"); return; }
         inspector.classList.remove("hidden");
         selLabel.textContent = selection.length === 1
@@ -137,6 +167,7 @@
     }
     function applyToSelection(fn) {
         selection.forEach(function (el) { fn(el); render(el); });
+        ensureCanvasFits(selection.map(function (el) { return el._st; }));
         markDirty();
     }
 
@@ -166,6 +197,7 @@
                 clampPosition(m.el);
                 render(m.el);
             });
+            ensureCanvasFits(moving.map(function (m) { return m.el._st; }));
         }
         function up() {
             el.releasePointerCapture(e.pointerId);
@@ -177,9 +209,170 @@
         el.addEventListener("pointerup", up);
     }
 
-    canvas.addEventListener("pointerdown", function (e) {
-        if (editing && e.target === canvas) { setSelection([]); }
-    });
+    canvas.addEventListener("pointerdown", onCanvasPointerDown);
+
+    function onCanvasPointerDown(e) {
+        if (!editing || e.target !== canvas || e.button !== 0 || e.isPrimary === false) { return; }
+        e.preventDefault();
+
+        var start = canvasPoint(e);
+        var overlay = document.createElement("div");
+        overlay.className = "selection-marquee";
+        overlay.setAttribute("aria-hidden", "true");
+        canvas.appendChild(overlay);
+
+        marquee = {
+            pointerId: e.pointerId,
+            start: start,
+            current: start,
+            base: selection.slice(),
+            additive: e.shiftKey || e.ctrlKey || e.metaKey,
+            subtractive: e.altKey,
+            moved: false,
+            overlay: overlay
+        };
+
+        canvas.setPointerCapture(e.pointerId);
+        canvas.addEventListener("pointermove", onMarqueeMove);
+        canvas.addEventListener("pointerup", onMarqueeUp);
+        canvas.addEventListener("pointercancel", onMarqueeCancel);
+    }
+
+    function onMarqueeMove(e) {
+        if (!marquee || e.pointerId !== marquee.pointerId) { return; }
+        e.preventDefault();
+        marquee.current = canvasPoint(e);
+        marquee.moved = marquee.moved ||
+            Math.abs(marquee.current.x - marquee.start.x) >= 3 ||
+            Math.abs(marquee.current.y - marquee.start.y) >= 3;
+        if (!marqueeFrame) {
+            marqueeFrame = window.requestAnimationFrame(function () {
+                marqueeFrame = null;
+                updateMarqueeSelection();
+            });
+        }
+    }
+
+    function onMarqueeUp(e) {
+        if (!marquee || e.pointerId !== marquee.pointerId) { return; }
+        marquee.current = canvasPoint(e);
+        if (marqueeFrame) {
+            window.cancelAnimationFrame(marqueeFrame);
+            marqueeFrame = null;
+        }
+        if (marquee.moved) {
+            updateMarqueeSelection();
+        } else if (!marquee.additive && !marquee.subtractive) {
+            setSelection([]);
+        }
+        cleanupMarquee();
+    }
+
+    function onMarqueeCancel(e) {
+        if (!marquee || e.pointerId !== marquee.pointerId) { return; }
+        setSelectionIfChanged(marquee.base);
+        cleanupMarquee();
+    }
+
+    function cleanupMarquee() {
+        if (!marquee) { return; }
+        if (marqueeFrame) {
+            window.cancelAnimationFrame(marqueeFrame);
+            marqueeFrame = null;
+        }
+        if (canvas.hasPointerCapture(marquee.pointerId)) {
+            canvas.releasePointerCapture(marquee.pointerId);
+        }
+        marquee.overlay.remove();
+        marquee = null;
+        canvas.removeEventListener("pointermove", onMarqueeMove);
+        canvas.removeEventListener("pointerup", onMarqueeUp);
+        canvas.removeEventListener("pointercancel", onMarqueeCancel);
+    }
+
+    function updateMarqueeSelection() {
+        if (!marquee || !marquee.moved) { return; }
+        var box = normalizedRect(marquee.start, marquee.current);
+        marquee.overlay.style.left = box.left + "px";
+        marquee.overlay.style.top = box.top + "px";
+        marquee.overlay.style.width = box.width + "px";
+        marquee.overlay.style.height = box.height + "px";
+
+        var hits = chips.filter(function (el) {
+            return rectsIntersect(box, stateBounds(el._st));
+        });
+        var next;
+        if (marquee.subtractive) {
+            next = marquee.base.filter(function (el) { return hits.indexOf(el) === -1; });
+        } else if (marquee.additive) {
+            next = marquee.base.slice();
+            hits.forEach(function (el) {
+                if (next.indexOf(el) === -1) { next.push(el); }
+            });
+        } else {
+            next = hits;
+        }
+        setSelectionIfChanged(next);
+    }
+
+    function canvasPoint(e) {
+        var rect = canvas.getBoundingClientRect();
+        return {
+            x: clamp((e.clientX - rect.left) * W / Math.max(1, rect.width), 0, W),
+            y: clamp((e.clientY - rect.top) * H / Math.max(1, rect.height), 0, H)
+        };
+    }
+
+    function normalizedRect(a, b) {
+        var left = Math.min(a.x, b.x);
+        var top = Math.min(a.y, b.y);
+        var right = Math.max(a.x, b.x);
+        var bottom = Math.max(a.y, b.y);
+        return {
+            left: left,
+            top: top,
+            right: right,
+            bottom: bottom,
+            width: right - left,
+            height: bottom - top
+        };
+    }
+
+    function stateBounds(s) {
+        var radians = (s.rot || 0) * Math.PI / 180;
+        var halfWidth = s.w / 2;
+        var halfHeight = s.h / 2;
+        var extentX = Math.abs(Math.cos(radians)) * halfWidth +
+            Math.abs(Math.sin(radians)) * halfHeight;
+        var extentY = Math.abs(Math.sin(radians)) * halfWidth +
+            Math.abs(Math.cos(radians)) * halfHeight;
+        var centerX = s.x + halfWidth;
+        var centerY = s.y + halfHeight;
+        return {
+            left: centerX - extentX,
+            top: centerY - extentY,
+            right: centerX + extentX,
+            bottom: centerY + extentY,
+            width: extentX * 2,
+            height: extentY * 2
+        };
+    }
+
+    function rectsIntersect(a, b) {
+        return a.left <= b.right && a.right >= b.left &&
+            a.top <= b.bottom && a.bottom >= b.top;
+    }
+
+    function inflateRect(rect, amount) {
+        return {
+            left: rect.left - amount,
+            top: rect.top - amount,
+            right: rect.right + amount,
+            bottom: rect.bottom + amount,
+            width: rect.width + amount * 2,
+            height: rect.height + amount * 2
+        };
+    }
 
     // --- Inspector controls --------------------------------------------------
     typeButtons.forEach(function (btn) {
@@ -222,32 +415,27 @@
         for (var i = 0; i < chips.length; i++) { if (chips[i]._st.r === r) { return chips[i]._st.rowLabel; } }
         return letter(r);
     }
-    function rowYFor(r) {
-        for (var i = 0; i < chips.length; i++) { if (chips[i]._st.r === r) { return chips[i]._st.y; } }
-        return START_Y + (r - 1) * GAP_Y;
-    }
-    function rowTypeFor(r) {
-        for (var i = 0; i < chips.length; i++) { if (chips[i]._st.r === r) { return chips[i]._st.type; } }
-        return "REGULAR";
-    }
-    function rowRightX(r) {
-        var mx = -Infinity;
-        chips.forEach(function (el) { if (el._st.r === r) { mx = Math.max(mx, el._st.x); } });
-        return mx === -Infinity ? START_X : mx;
-    }
     function maxColInRow(r) {
         return chips.reduce(function (m, el) { return el._st.r === r ? Math.max(m, el._st.c) : m; }, 0);
     }
 
-    function createChip(st) {
+    function createChip(st, parent) {
         var el = document.createElement("span");
+        ensureSeatKey(st);
         el._st = st;
         el.addEventListener("pointerdown", onSeatPointerDown);
-        canvas.appendChild(el);
+        (parent || canvas).appendChild(el);
         chips.push(el);
         clampPosition(el);
         render(el);
         return el;
+    }
+
+    function createChips(states) {
+        var fragment = document.createDocumentFragment();
+        var created = states.map(function (state) { return createChip(state, fragment); });
+        canvas.appendChild(fragment);
+        return created;
     }
 
     function afterStructureChange(newlySelected) {
@@ -256,47 +444,352 @@
         setSelection(newlySelected || []);
     }
 
+    function seatTemplate() {
+        var source = primary ? primary._st : null;
+        return {
+            w: source ? source.w : DEF_W,
+            h: source ? source.h : DEF_H,
+            type: source ? source.type : "REGULAR",
+            section: source ? source.section : ""
+        };
+    }
+
+    function readGap(input, fallback) {
+        return clamp(int(input ? input.value : fallback, fallback), 0, 160);
+    }
+
+    function readGridSpec(normalize) {
+        var template = seatTemplate();
+        var spec = {
+            columns: clamp(int(gridColumns ? gridColumns.value : 8, 8), 1, 50),
+            rows: clamp(int(gridRows ? gridRows.value : 5, 5), 1, 50),
+            gapX: readGap(gridGapX, GAP_X - DEF_W),
+            gapY: readGap(gridGapY, GAP_Y - DEF_H),
+            seatWidth: template.w,
+            seatHeight: template.h,
+            type: template.type,
+            section: template.section
+        };
+        if (normalize) {
+            if (gridColumns) { gridColumns.value = spec.columns; }
+            if (gridRows) { gridRows.value = spec.rows; }
+            if (gridGapX) { gridGapX.value = spec.gapX; }
+            if (gridGapY) { gridGapY.value = spec.gapY; }
+        }
+        return spec;
+    }
+
+    function usablePlacementBounds() {
+        return {
+            left: LAYOUT_MARGIN,
+            top: Math.min(H - LAYOUT_MARGIN, Math.max(LAYOUT_MARGIN, STAGE_CLEAR_BOTTOM)),
+            right: Math.max(LAYOUT_MARGIN, W - LAYOUT_MARGIN),
+            bottom: Math.max(LAYOUT_MARGIN, H - LAYOUT_MARGIN)
+        };
+    }
+
+    function gridBlockSize(spec) {
+        return {
+            width: spec.columns * spec.seatWidth + (spec.columns - 1) * spec.gapX,
+            height: spec.rows * spec.seatHeight + (spec.rows - 1) * spec.gapY
+        };
+    }
+
+    function setCanvasSize(width, height) {
+        W = Math.max(320, Math.round(width));
+        H = Math.max(240, Math.round(height));
+        canvas.dataset.w = String(W);
+        canvas.dataset.h = String(H);
+        canvas.style.width = W + "px";
+        canvas.style.height = H + "px";
+        if (hall3dHost) {
+            hall3dHost.dataset.w = String(W);
+            hall3dHost.dataset.h = String(H);
+        }
+        refreshGridCapacity();
+    }
+
+    function ensureCanvasFits(states) {
+        if (!states || !states.length) { return false; }
+        var requiredRight = states.reduce(function (right, state) {
+            return Math.max(right, stateBounds(state).right);
+        }, 0);
+        var requiredBottom = states.reduce(function (bottom, state) {
+            return Math.max(bottom, stateBounds(state).bottom);
+        }, 0);
+        var nextWidth = W;
+        var nextHeight = H;
+
+        if (requiredRight + LAYOUT_MARGIN > W) {
+            nextWidth = roundUp(requiredRight + LAYOUT_MARGIN, CANVAS_GROW_STEP);
+        }
+        if (requiredBottom + LAYOUT_MARGIN > H) {
+            nextHeight = roundUp(requiredBottom + LAYOUT_MARGIN, CANVAS_GROW_STEP);
+        }
+        if (nextWidth === W && nextHeight === H) { return false; }
+        setCanvasSize(nextWidth, nextHeight);
+        return true;
+    }
+
+    function refreshGridCapacity() {
+        if (!gridFitSummary) { return; }
+        var spec = readGridSpec(false);
+        var block = gridBlockSize(spec);
+        gridFitSummary.textContent = "Block " + Math.round(block.width) + " x " +
+            Math.round(block.height) + " px | Canvas " + W + " x " + H +
+            " px | Auto grows";
+    }
+
+    function stageReservedRect() {
+        var stageWidth = Math.min(W * 0.6, 520);
+        return {
+            left: (W - stageWidth) / 2 - PLACEMENT_CLEARANCE,
+            top: 40 - PLACEMENT_CLEARANCE,
+            right: (W + stageWidth) / 2 + PLACEMENT_CLEARANCE,
+            bottom: STAGE_CLEAR_BOTTOM,
+            width: stageWidth + PLACEMENT_CLEARANCE * 2,
+            height: STAGE_CLEAR_BOTTOM - 40 + PLACEMENT_CLEARANCE
+        };
+    }
+
+    function rectsOverlap(a, b) {
+        return a.left < b.right && a.right > b.left &&
+            a.top < b.bottom && a.bottom > b.top;
+    }
+
+    function validateSeatPlan(states, context) {
+        if (!states.length) { return "Nothing to add."; }
+
+        var stage = stageReservedRect();
+        var existing = chips.map(function (el) {
+            return inflateRect(stateBounds(el._st), PLACEMENT_CLEARANCE / 2);
+        });
+        var planned = [];
+
+        for (var i = 0; i < states.length; i++) {
+            var rect = stateBounds(states[i]);
+            if (rect.left < 0 || rect.top < 0) {
+                return "Cannot add " + context + " outside the hall origin.";
+            }
+            if (rectsOverlap(rect, stage)) {
+                return "No room for " + context + " without entering the stage clearance.";
+            }
+
+            var padded = inflateRect(rect, PLACEMENT_CLEARANCE / 2);
+            if (existing.some(function (obstacle) { return rectsOverlap(padded, obstacle); })) {
+                return "Cannot add " + context + " because it would overlap existing seats.";
+            }
+            if (planned.some(function (other) { return rectsOverlap(padded, other); })) {
+                return "The requested spacing is too small for " + context + ".";
+            }
+            planned.push(padded);
+        }
+        return null;
+    }
+
+    function commitSeatPlan(states, context) {
+        var issue = validateSeatPlan(states, context);
+        if (issue) {
+            statusEl.textContent = issue;
+            statusEl.className = "layout-status error-text";
+            return [];
+        }
+        ensureCanvasFits(states);
+        var added = createChips(states);
+        afterStructureChange(added);
+        return added;
+    }
+
+    function findGridAnchor(spec) {
+        var bounds = usablePlacementBounds();
+        var block = gridBlockSize(spec);
+        var blockWidth = block.width;
+        var blockHeight = block.height;
+        var maxX = bounds.right - blockWidth;
+        var maxY = bounds.bottom - blockHeight;
+        if (maxX < bounds.left || maxY < bounds.top) { return null; }
+
+        var obstacles = chips.map(function (el) {
+            return inflateRect(stateBounds(el._st), PLACEMENT_CLEARANCE);
+        });
+        obstacles.push(stageReservedRect());
+
+        var yCandidates = [bounds.top];
+        obstacles.forEach(function (obstacle) {
+            if (obstacle.bottom >= bounds.top && obstacle.bottom <= maxY) {
+                yCandidates.push(Math.ceil(obstacle.bottom));
+            }
+        });
+        yCandidates.sort(function (a, b) { return a - b; });
+        yCandidates = yCandidates.filter(function (value, index, list) {
+            return index === 0 || value !== list[index - 1];
+        });
+
+        for (var yi = 0; yi < yCandidates.length; yi++) {
+            var y = yCandidates[yi];
+            var x = bounds.left;
+            while (x <= maxX) {
+                var candidate = {
+                    left: x,
+                    top: y,
+                    right: x + blockWidth,
+                    bottom: y + blockHeight,
+                    width: blockWidth,
+                    height: blockHeight
+                };
+                var collisions = obstacles.filter(function (obstacle) {
+                    return rectsOverlap(candidate, obstacle);
+                });
+                if (!collisions.length) {
+                    return { x: Math.round(x), y: Math.round(y) };
+                }
+                x = Math.max.apply(null, collisions.map(function (obstacle) {
+                    return obstacle.right;
+                }));
+            }
+        }
+        return null;
+    }
+
+    function findExpansionGridAnchor(spec) {
+        var block = gridBlockSize(spec);
+        var lastSeatBottom = chips.reduce(function (bottom, el) {
+            return Math.max(bottom, stateBounds(el._st).bottom);
+        }, STAGE_CLEAR_BOTTOM);
+        var futureWidth = Math.max(W, block.width + LAYOUT_MARGIN * 2);
+        return {
+            x: Math.round((futureWidth - block.width) / 2),
+            y: Math.ceil(lastSeatBottom + Math.max(PLACEMENT_CLEARANCE, spec.gapY))
+        };
+    }
+
+    function generateSeatGrid() {
+        var spec = readGridSpec(true);
+        var count = spec.columns * spec.rows;
+        if (count > MAX_BULK_SEATS) {
+            statusEl.textContent = "Generate at most " + MAX_BULK_SEATS + " seats at a time.";
+            statusEl.className = "layout-status error-text";
+            return;
+        }
+
+        var anchor = findGridAnchor(spec) || findExpansionGridAnchor(spec);
+
+        var firstRow = maxRow() + 1;
+        var states = [];
+        for (var rowOffset = 0; rowOffset < spec.rows; rowOffset++) {
+            var rowIndex = firstRow + rowOffset;
+            var rowLabel = letter(rowIndex);
+            for (var columnOffset = 0; columnOffset < spec.columns; columnOffset++) {
+                var seatNumber = columnOffset + 1;
+                states.push({
+                    id: null,
+                    label: rowLabel + seatNumber,
+                    rowLabel: rowLabel,
+                    r: rowIndex,
+                    c: seatNumber,
+                    x: anchor.x + columnOffset * (spec.seatWidth + spec.gapX),
+                    y: anchor.y + rowOffset * (spec.seatHeight + spec.gapY),
+                    w: spec.seatWidth,
+                    h: spec.seatHeight,
+                    rot: 0,
+                    section: spec.section,
+                    type: spec.type
+                });
+            }
+        }
+        commitSeatPlan(states, "the " + spec.columns + " x " + spec.rows + " seat block");
+    }
+
+    function nextRowY(gap) {
+        return Math.ceil(chips.reduce(function (bottom, el) {
+            return Math.max(bottom, stateBounds(el._st).bottom);
+        }, STAGE_CLEAR_BOTTOM) + gap);
+    }
+
+    function columnX(c, width) {
+        var centers = chips.filter(function (el) { return el._st.c === c; }).map(function (el) {
+            return el._st.x + el._st.w / 2;
+        });
+        return centers.length ? Math.round(median(centers) - width / 2) :
+            START_X + (c - 1) * GAP_X;
+    }
+
+    function rightmostSeatInRow(r) {
+        var seats = chips.filter(function (el) { return el._st.r === r; });
+        return seats.reduce(function (rightmost, el) {
+            if (!rightmost) { return el; }
+            return stateBounds(el._st).right > stateBounds(rightmost._st).right ? el : rightmost;
+        }, null);
+    }
+
     btnAddRow().addEventListener("click", function () {
         var newR = maxRow() + 1;
         var cols = maxCol() || 1;
         var rl = letter(newR);
-        var added = [];
+        var template = seatTemplate();
+        var y = nextRowY(readGap(gridGapY, GAP_Y - DEF_H));
+        var states = [];
         for (var c = 1; c <= cols; c++) {
-            added.push(createChip({
+            states.push({
                 id: null, label: rl + c, rowLabel: rl, r: newR, c: c,
-                x: START_X + (c - 1) * GAP_X, y: START_Y + (newR - 1) * GAP_Y,
-                w: DEF_W, h: DEF_H, rot: 0, section: "", type: "REGULAR"
-            }));
+                x: columnX(c, template.w), y: y,
+                w: template.w, h: template.h, rot: 0,
+                section: template.section, type: template.type
+            });
         }
-        afterStructureChange(added);
+        commitSeatPlan(states, "another row");
     });
 
     btnAddCol().addEventListener("click", function () {
         var newC = maxCol() + 1;
-        var added = [];
+        var gap = readGap(gridGapX, GAP_X - DEF_W);
+        var states = [];
         rowsPresent().forEach(function (r) {
             var rl = rowLabelFor(r);
-            added.push(createChip({
+            var rightmost = rightmostSeatInRow(r);
+            var source = rightmost._st;
+            states.push({
                 id: null, label: rl + newC, rowLabel: rl, r: r, c: newC,
-                x: rowRightX(r) + GAP_X, y: rowYFor(r),
-                w: DEF_W, h: DEF_H, rot: 0, section: "", type: rowTypeFor(r)
-            }));
+                x: Math.ceil(stateBounds(source).right + gap), y: source.y,
+                w: source.w, h: source.h, rot: 0,
+                section: source.section, type: source.type
+            });
         });
-        afterStructureChange(added);
+        commitSeatPlan(states, "another column");
     });
 
     btnAddSeat().addEventListener("click", function () {
-        var r, rl, type;
-        if (primary) { r = primary._st.r; rl = rowLabelFor(r); type = primary._st.type; }
-        else { r = maxRow() + 1; rl = letter(r); type = "REGULAR"; }
+        var r, rl, x, y;
+        var template = seatTemplate();
+        var gapX = readGap(gridGapX, GAP_X - DEF_W);
+        if (primary) {
+            r = primary._st.r;
+            rl = rowLabelFor(r);
+            var rightmost = rightmostSeatInRow(r);
+            x = Math.ceil(stateBounds(rightmost._st).right + gapX);
+            y = primary._st.y;
+        } else {
+            r = maxRow() + 1;
+            rl = letter(r);
+            x = LAYOUT_MARGIN;
+            y = nextRowY(readGap(gridGapY, GAP_Y - DEF_H));
+        }
         var c = maxColInRow(r) + 1;
-        var chip = createChip({
+        commitSeatPlan([{
             id: null, label: rl + c, rowLabel: rl, r: r, c: c,
-            x: rowRightX(r) + GAP_X, y: rowYFor(r),
-            w: DEF_W, h: DEF_H, rot: 0, section: "", type: type
-        });
-        afterStructureChange([chip]);
+            x: x, y: y,
+            w: template.w, h: template.h, rot: 0,
+            section: template.section, type: template.type
+        }], "another seat");
     });
+
+    if (btnAddGrid) {
+        btnAddGrid.addEventListener("click", generateSeatGrid);
+        [gridColumns, gridRows, gridGapX, gridGapY].forEach(function (input) {
+            if (input) { input.addEventListener("input", refreshGridCapacity); }
+        });
+        refreshGridCapacity();
+    }
 
     function removeChips(list) {
         if (!list.length) { return; }
@@ -352,6 +845,7 @@
         return true;
     }
     function afterArrange() {
+        ensureCanvasFits(selection.map(function (el) { return el._st; }));
         selection.forEach(render);
         refreshInspector();
         markDirty();
@@ -485,16 +979,23 @@
         btnSave.classList.toggle("hidden", !on);
         btnCancel.classList.toggle("hidden", !on);
         tools.classList.toggle("hidden", !on);
+        if (bulkGridTools) { bulkGridTools.classList.toggle("hidden", !on); }
         arrangeTools.classList.toggle("hidden", !on);
         hintEl.textContent = on
             ? "Drag to move. Shift-click to select several, then align, distribute, snap to grid, or rotate the group as one."
             : "";
-        if (!on) { setSelection([]); }
+        if (!on) {
+            if (marquee) { cleanupMarquee(); }
+            setSelection([]);
+        }
+        notifyBridge("mode");
     }
 
     function markDirty() {
         statusEl.textContent = "Unsaved changes";
         statusEl.className = "layout-status dirty";
+        refreshGridCapacity();
+        notifyBridge("change");
     }
 
     btnEdit.addEventListener("click", function () {
@@ -513,6 +1014,7 @@
             el._st = copy(savedState[i]);
             render(el);
         });
+        setCanvasSize(savedCanvas.width, savedCanvas.height);
         setEditing(false);
         statusEl.textContent = "";
         statusEl.className = "layout-status";
@@ -569,13 +1071,19 @@
             (hall.seats || []).forEach(function (s) { idByLabel[s.label] = s.id; });
             chips.forEach(function (el) {
                 var id = idByLabel[el._st.label];
-                if (id != null) { el._st.id = id; el.dataset.id = id; }
+                if (id != null) {
+                    el._st.id = id;
+                    el._st.key = "seat:" + id;
+                    el.dataset.id = id;
+                }
             });
             savedState = chips.map(function (el) { return copy(el._st); });
+            savedCanvas = { width: W, height: H };
             structureChanged = false;
             setEditing(false);
             statusEl.textContent = "Saved ✓";
             statusEl.className = "layout-status saved";
+            notifyBridge("saved");
         }).catch(function (err) {
             statusEl.textContent = "Save failed: " + shorten(err.message);
             statusEl.className = "layout-status error-text";
@@ -583,6 +1091,103 @@
             btnSave.disabled = false;
         });
     });
+
+    // --- 2D/3D editor bridge -------------------------------------------------
+    function ensureSeatKey(s) {
+        if (!s.key) {
+            s.key = s.id != null ? "seat:" + s.id : "draft:" + nextDraftKey++;
+        }
+        return s.key;
+    }
+
+    function snapshot() {
+        return {
+            version: 1,
+            width: W,
+            height: H,
+            editing: editing,
+            selectedKeys: selection.map(function (el) { return ensureSeatKey(el._st); }),
+            seats: chips.map(function (el) {
+                var seat = copy(el._st);
+                seat.key = ensureSeatKey(el._st);
+                return seat;
+            })
+        };
+    }
+
+    function notifyBridge(reason) {
+        if (!window.HallSeatEditor) { return; }
+        var detail = { reason: reason, state: snapshot() };
+        bridgeListeners.slice().forEach(function (listener) {
+            try { listener(detail.state, reason); } catch (err) { console.error(err); }
+        });
+        window.dispatchEvent(new CustomEvent("hall-seat-editor-change", { detail: detail }));
+    }
+
+    function findByKey(key) {
+        for (var i = 0; i < chips.length; i++) {
+            if (ensureSeatKey(chips[i]._st) === key) { return chips[i]; }
+        }
+        return null;
+    }
+
+    window.HallSeatEditor = {
+        getState: snapshot,
+        isEditing: function () { return editing; },
+        subscribe: function (listener) {
+            if (typeof listener !== "function") { return function () {}; }
+            bridgeListeners.push(listener);
+            listener(snapshot(), "subscribe");
+            return function () {
+                var index = bridgeListeners.indexOf(listener);
+                if (index !== -1) { bridgeListeners.splice(index, 1); }
+            };
+        },
+        select: function (keys) {
+            var seen = {};
+            var list = (keys || []).map(findByKey).filter(function (el) {
+                if (!el) { return false; }
+                var key = ensureSeatKey(el._st);
+                if (seen[key]) { return false; }
+                seen[key] = true;
+                return true;
+            });
+            setSelection(list);
+        },
+        applySpatialPatch: function (patches, options) {
+            if (!editing) { return false; }
+            var changed = false;
+            var changedStates = [];
+            (patches || []).forEach(function (patch) {
+                var el = findByKey(patch.key);
+                if (!el) { return; }
+                if (typeof patch.x === "number" && isFinite(patch.x)) {
+                    el._st.x = Math.round(patch.x);
+                    changed = true;
+                }
+                if (typeof patch.y === "number" && isFinite(patch.y)) {
+                    el._st.y = Math.round(patch.y);
+                    changed = true;
+                }
+                if (typeof patch.rot === "number" && isFinite(patch.rot)) {
+                    el._st.rot = clamp(Math.round(patch.rot), -180, 180);
+                    changed = true;
+                }
+                clampPosition(el);
+                render(el);
+                changedStates.push(el._st);
+            });
+            if (changed) {
+                ensureCanvasFits(changedStates);
+                refreshInspector();
+                if (!(options && options.transient)) { markDirty(); }
+            }
+            return changed;
+        }
+    };
+
+    notifyBridge("ready");
+    window.dispatchEvent(new CustomEvent("hall-seat-editor-ready"));
 
     // --- helpers -------------------------------------------------------------
     function btnAddRow() { return document.getElementById("btnAddRow"); }
@@ -599,10 +1204,12 @@
     function int(v, fallback) { var n = parseInt(v, 10); return isNaN(n) ? fallback : n; }
     function hasVal(v) { return v !== undefined && v !== null && v !== "" && v !== "null"; }
     function clamp(n, lo, hi) { return Math.max(lo, Math.min(hi, n)); }
+    function roundUp(value, step) { return Math.ceil(value / step) * step; }
     function copy(s) {
         return {
             id: s.id, label: s.label, rowLabel: s.rowLabel, r: s.r, c: s.c,
-            x: s.x, y: s.y, w: s.w, h: s.h, rot: s.rot, section: s.section, type: s.type
+            x: s.x, y: s.y, w: s.w, h: s.h, rot: s.rot, section: s.section, type: s.type,
+            key: s.key
         };
     }
     function letter(n) {

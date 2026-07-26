@@ -3,7 +3,7 @@
 <head th:replace="~{fragments/common :: head('Hall')}"></head>
 <body>
 <header th:replace="~{fragments/common :: topbar}"></header>
-<main class="container">
+<main class="container hall-page">
     <div th:replace="~{fragments/common :: flash}"></div>
     <div class="page-head">
         <h1 th:text="${hall.name()}">Hall</h1>
@@ -29,10 +29,18 @@
                     40 seats across 5 rows
                 </p>
             </div>
-            <div class="layout-legend" aria-label="Seat type legend">
-                <span><i class="seat-dot VIP"></i>VIP</span>
-                <span><i class="seat-dot PREMIUM"></i>Premium</span>
-                <span><i class="seat-dot REGULAR"></i>Regular</span>
+            <div class="layout-toolbar-meta">
+                <div class="layout-view-switch" role="tablist" aria-label="Layout view">
+                    <button type="button" id="viewPlan" class="active" role="tab"
+                            aria-selected="true" aria-controls="planView">2D plan</button>
+                    <button type="button" id="view3d" role="tab"
+                            aria-selected="false" aria-controls="threeView">3D hall</button>
+                </div>
+                <div class="layout-legend" aria-label="Seat type legend">
+                    <span><i class="seat-dot VIP"></i>VIP</span>
+                    <span><i class="seat-dot PREMIUM"></i>Premium</span>
+                    <span><i class="seat-dot REGULAR"></i>Regular</span>
+                </div>
             </div>
         </div>
 
@@ -43,6 +51,15 @@
             <span id="layoutStatus" class="layout-status"></span>
         </div>
 
+        <div class="three-toolbar hidden" id="threeToolbar">
+            <div class="camera-switch" role="group" aria-label="3D camera">
+                <button type="button" id="cameraPerspective" class="active" aria-pressed="true">Perspective</button>
+                <button type="button" id="cameraTop" aria-pressed="false">Top</button>
+            </div>
+            <button type="button" id="fit3d" class="btn secondary small">Fit view</button>
+            <span id="threeSelection" class="three-selection">View only</span>
+        </div>
+
         <div class="layout-tools hidden" id="layoutTools">
             <button type="button" id="btnAddRow" class="btn secondary small">+ Row</button>
             <button type="button" id="btnAddCol" class="btn secondary small">+ Column</button>
@@ -51,6 +68,28 @@
             <button type="button" id="btnDelSeat" class="btn danger small">Delete seat(s)</button>
             <button type="button" id="btnDelRow" class="btn danger small">Delete row</button>
             <button type="button" id="btnDelCol" class="btn danger small">Delete column</button>
+        </div>
+
+        <div class="layout-tools grid-generator hidden" id="bulkGridTools" aria-label="Bulk seat grid">
+            <span class="tools-label">Seat block</span>
+            <label class="compact-field" for="gridColumns">
+                <span>Columns (X)</span>
+                <input type="number" id="gridColumns" value="8" min="1" max="50" step="1" inputmode="numeric"/>
+            </label>
+            <label class="compact-field" for="gridRows">
+                <span>Rows (Y)</span>
+                <input type="number" id="gridRows" value="5" min="1" max="50" step="1" inputmode="numeric"/>
+            </label>
+            <label class="compact-field" for="gridGapX">
+                <span>Column gap</span>
+                <input type="number" id="gridGapX" value="16" min="0" max="160" step="1" inputmode="numeric"/>
+            </label>
+            <label class="compact-field" for="gridGapY">
+                <span>Row gap</span>
+                <input type="number" id="gridGapY" value="14" min="0" max="160" step="1" inputmode="numeric"/>
+            </label>
+            <span class="grid-fit-summary" id="gridFitSummary" aria-live="polite"></span>
+            <button type="button" id="btnAddGrid" class="btn small">Generate seats</button>
         </div>
 
         <div class="layout-tools hidden" id="arrangeTools">
@@ -115,7 +154,7 @@
 
         <p class="muted layout-hint" id="layoutHint"></p>
 
-        <div class="seat-canvas-shell">
+        <div class="seat-canvas-shell" id="planView" role="tabpanel" aria-labelledby="viewPlan">
             <div class="seat-canvas" id="seatCanvas"
                  th:attr="data-w=${hall.layoutWidth()}, data-h=${hall.layoutHeight()},
                           data-seats-url=@{/halls/{id}/seats(id=${hall.id()})}, data-cols=${hall.numColumns()}">
@@ -133,8 +172,22 @@
                       th:text="${s.label()}">A1</span>
             </div>
         </div>
+
+        <div class="hall-3d-shell hidden" id="threeView" role="tabpanel"
+             aria-labelledby="view3d">
+            <div class="hall-3d-canvas" id="hall3dCanvas"
+                 th:attr="data-w=${hall.layoutWidth()}, data-h=${hall.layoutHeight()}"></div>
+        </div>
     </section>
 </main>
-<script th:src="@{/js/seat-layout.js}"></script>
+<script type="importmap">
+{
+  "imports": {
+    "three": "/vendor/three/three.module.min.js"
+  }
+}
+</script>
+<script th:src="@{/js/seat-layout.js(v=4)}"></script>
+<script type="module" th:src="@{/js/hall-3d.js(v=4)}"></script>
 </body>
 </html>

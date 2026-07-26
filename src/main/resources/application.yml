@@ -8,7 +8,7 @@ spring:
       fail-on-unknown-properties: false
 
 server:
-  port: ${SERVER_PORT:8091}
+  port: ${SERVER_PORT:8092}
 
 # Single admin login (basic username/password).
 admin:
@@ -18,7 +18,7 @@ admin:
 # Base URL of the event-ticketing API this console manages.
 # Docker event-ticketing => http://localhost:8090 ; host/STS run => http://localhost:8089
 ticketing:
-  base-url: ${TICKETING_BASE_URL:http://localhost:8089}
+  base-url: ${TICKETING_BASE_URL:http://localhost:8082}
 
 logging:
   level:
