@@ -12,6 +12,7 @@ public record SeatResponse(
         Integer rotationDegrees,
         Integer layoutWidth,
         Integer layoutHeight,
-        String sectionName
+        String sectionName,
+        Long sectionId
 ) {
 }

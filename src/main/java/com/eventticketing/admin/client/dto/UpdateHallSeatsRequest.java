@@ -6,6 +6,7 @@ public record UpdateHallSeatsRequest(
         Integer layoutWidth,
         Integer layoutHeight,
         List<SeatEditItem> seats,
-        List<LayoutObjectItem> layoutObjects
+        List<LayoutObjectItem> layoutObjects,
+        List<SectionItem> sections
 ) {
 }

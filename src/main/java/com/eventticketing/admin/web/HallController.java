@@ -84,8 +84,18 @@ public class HallController {
 
     @GetMapping("/{id}")
     public String view(@PathVariable Long id, Model model) {
-        model.addAttribute("hall", client.getHall(id));
+        HallResponse hall = client.getHall(id);
+        model.addAttribute("hall", hall);
+        model.addAttribute("sectionsJson", writeJsonOrEmpty(hall.sections()));
         return "halls/view";
+    }
+
+    private String writeJsonOrEmpty(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value != null ? value : java.util.List.of());
+        } catch (Exception ex) {
+            return "[]";
+        }
     }
 
     @GetMapping("/{id}/edit")

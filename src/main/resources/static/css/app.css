@@ -480,6 +480,21 @@ form.inline { display: inline; margin: 0; }
 
 .layout-tools .tools-note { font-size: .72rem; }
 
+/* Section drawing overlay */
+.section-layer { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 2; }
+.seat-canvas.section-editing .seat-chip,
+.seat-canvas.section-editing .table-chip { pointer-events: none; }
+.section-label {
+  fill: #fff; font-size: 13px; font-weight: 800;
+  paint-order: stroke; stroke: rgba(15, 18, 24, .6); stroke-width: 3px;
+}
+.section-handle { fill: #fff; stroke: #f59e0b; stroke-width: 2; }
+
+/* Simple table (pricing screen) */
+.table { width: 100%; border-collapse: collapse; }
+.table th, .table td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #e5e7eb; }
+.table th { font-size: .78rem; color: #55607a; font-weight: 700; }
+
 .selection-marquee {
   position: absolute;
   z-index: 20;

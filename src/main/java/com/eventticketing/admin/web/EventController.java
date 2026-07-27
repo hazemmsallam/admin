@@ -4,8 +4,10 @@ import com.eventticketing.admin.client.TicketingApiException;
 import com.eventticketing.admin.client.TicketingClient;
 import com.eventticketing.admin.client.dto.CreateEventRequest;
 import com.eventticketing.admin.client.dto.EventResponse;
+import com.eventticketing.admin.client.dto.HallResponse;
 import com.eventticketing.admin.client.dto.PricingItem;
 import com.eventticketing.admin.client.dto.PricingResponse;
+import com.eventticketing.admin.client.dto.SectionResponse;
 import com.eventticketing.admin.client.dto.SetEventPricingRequest;
 import com.eventticketing.admin.client.dto.UpdateEventStatusRequest;
 import com.eventticketing.admin.web.form.EventForm;
@@ -133,8 +135,10 @@ public class EventController {
     @GetMapping("/{id}/pricing")
     public String pricingForm(@PathVariable Long id, Model model) {
         EventResponse event = client.getEvent(id);
+        HallResponse hall = client.getHall(event.hall().id());
         model.addAttribute("event", event);
-        model.addAttribute("pricing", toPricingForm(event));
+        model.addAttribute("hall", hall);
+        model.addAttribute("pricing", toPricingForm(event, hall));
         return "events/pricing";
     }
 
@@ -142,13 +146,23 @@ public class EventController {
     public String setPricing(@PathVariable Long id, @ModelAttribute("pricing") PricingForm form,
                              Model model, RedirectAttributes ra) {
         EventResponse event = client.getEvent(id);
+        HallResponse hall = client.getHall(event.hall().id());
         List<PricingItem> items = new ArrayList<>();
-        if (event.hall() != null && event.hall().seated()) {
+
+        boolean hasSections = hall.sections() != null && !hall.sections().isEmpty();
+        if (hasSections) {
+            // Dynamic per-section pricing — any section name, any price.
+            for (PricingForm.SectionPriceRow row : form.getSections()) {
+                if (row != null && row.getSectionId() != null && row.getPrice() != null) {
+                    items.add(new PricingItem(null, row.getSectionId(), row.getPrice()));
+                }
+            }
+        } else if (event.hall() != null && event.hall().seated()) {
             addIfPresent(items, "VIP", form.getVipPrice());
             addIfPresent(items, "PREMIUM", form.getPremiumPrice());
             addIfPresent(items, "REGULAR", form.getRegularPrice());
         } else if (form.getGeneralPrice() != null) {
-            items.add(new PricingItem(null, form.getGeneralPrice()));
+            items.add(new PricingItem(null, null, form.getGeneralPrice()));
         }
         try {
             client.setPricing(id, new SetEventPricingRequest(items));
@@ -156,6 +170,7 @@ public class EventController {
             return "redirect:/events/" + id;
         } catch (TicketingApiException ex) {
             model.addAttribute("event", event);
+            model.addAttribute("hall", hall);
             model.addAttribute("error", ex.getMessage());
             return "events/pricing";
         }
@@ -186,11 +201,16 @@ public class EventController {
                 form.getOrganizerId(), form.getHallId(), form.getMaxCapacity());
     }
 
-    private PricingForm toPricingForm(EventResponse event) {
+    private PricingForm toPricingForm(EventResponse event, HallResponse hall) {
         PricingForm form = new PricingForm();
+
+        // Existing per-section prices already configured for this event, keyed by section id.
+        java.util.Map<Long, BigDecimal> pricedBySection = new java.util.HashMap<>();
         if (event.pricing() != null) {
             for (PricingResponse p : event.pricing()) {
-                if (p.seatType() == null) {
+                if (p.sectionId() != null) {
+                    pricedBySection.put(p.sectionId(), p.price());
+                } else if (p.seatType() == null) {
                     form.setGeneralPrice(p.price());
                 } else switch (p.seatType()) {
                     case "VIP" -> form.setVipPrice(p.price());
@@ -201,12 +221,25 @@ public class EventController {
                 }
             }
         }
+
+        if (hall.sections() != null) {
+            for (SectionResponse section : hall.sections()) {
+                PricingForm.SectionPriceRow row = new PricingForm.SectionPriceRow();
+                row.setSectionId(section.id());
+                row.setName(section.name());
+                row.setBookingMode(section.bookingMode());
+                row.setCurrency(section.currency());
+                // Prefill with the event's configured price, else the section's default.
+                row.setPrice(pricedBySection.getOrDefault(section.id(), section.defaultPrice()));
+                form.getSections().add(row);
+            }
+        }
         return form;
     }
 
     private void addIfPresent(List<PricingItem> items, String seatType, BigDecimal price) {
         if (price != null) {
-            items.add(new PricingItem(seatType, price));
+            items.add(new PricingItem(seatType, null, price));
         }
     }
 
