@@ -116,9 +116,22 @@ import { RoundedBoxGeometry } from "/vendor/three/RoundedBoxGeometry.js";
     var hitPoint = new THREE.Vector3();
     var drag = null;
 
+    // Non-bookable tables live in their own group, one THREE.Group per table (they are few).
+    var tableRoot = new THREE.Group();
+    tableRoot.name = "tables";
+    scene.add(tableRoot);
+    var tableEntries = [];
+    var tableByKey = new Map();
+    var tableSignature = "";
+    var tableDrag = null;
+    var TABLE_TOP_COLOR = 0x8a5a33;
+    var TABLE_LEG_COLOR = 0x4a3421;
+    var TABLE_SEL_COLOR = 0xffc857;
+
     buildLighting();
     buildHall();
     rebuildSeats(state);
+    rebuildTables(state);
     setCameraMode("perspective", true);
     resize();
     renderer.setAnimationLoop(renderFrame);
@@ -142,6 +155,7 @@ import { RoundedBoxGeometry } from "/vendor/three/RoundedBoxGeometry.js";
         } else {
             updateSeatTransforms(state);
         }
+        syncTables(state);
         updateSelectionStatus();
         host.classList.toggle("editing", state.editing);
         if (dimensionsChanged && isThreeView) {
@@ -598,17 +612,23 @@ import { RoundedBoxGeometry } from "/vendor/three/RoundedBoxGeometry.js";
     }
 
     function onPointerHover(event) {
-        if (drag || !isThreeView) { return; }
-        host.classList.toggle("seat-hover", Boolean(pickSeat(event)));
+        if (drag || tableDrag || !isThreeView) { return; }
+        host.classList.toggle("seat-hover", Boolean(pickSeat(event) || pickTable(event)));
     }
 
     function onPointerDown(event) {
         if (!isThreeView || event.button !== 0) { return; }
         var key = pickSeat(event);
         if (!key) {
-            if (!event.shiftKey) { editor.select([]); }
+            var tableKey = pickTable(event);
+            if (tableKey) { handleTablePointerDown(event, tableKey); return; }
+            if (!event.shiftKey) {
+                editor.select([]);
+                if (editor.selectTable) { editor.selectTable(null); }
+            }
             return;
         }
+        if (editor.selectTable) { editor.selectTable(null); }
 
         var selectedKeys = state.selectedKeys.slice();
         if (event.shiftKey) {
@@ -718,6 +738,217 @@ import { RoundedBoxGeometry } from "/vendor/three/RoundedBoxGeometry.js";
         }
     }
 
+    // --- Tables (non-bookable) ----------------------------------------------
+    function tableSig(tables) {
+        return (tables || []).map(function (t) {
+            return t.key + ":" + t.shape + ":" + t.w + ":" + t.d + ":" + t.height;
+        }).join("|");
+    }
+
+    function syncTables(nextState) {
+        var sig = tableSig(nextState.tables);
+        if (sig !== tableSignature) {
+            rebuildTables(nextState);
+        } else {
+            updateTableTransforms(nextState);
+        }
+    }
+
+    function rebuildTables(nextState) {
+        disposeTables();
+        (nextState.tables || []).forEach(function (t) {
+            var group = buildTableGroup(t);
+            group.userData.tableKey = t.key;
+            tableRoot.add(group);
+            tableEntries.push(group);
+            tableByKey.set(t.key, group);
+        });
+        tableSignature = tableSig(nextState.tables);
+        updateTableTransforms(nextState);
+    }
+
+    function buildTableGroup(t) {
+        var group = new THREE.Group();
+        var hWorld = Math.max(0.12, t.height / PIXELS_PER_METER);
+        var wWorld = Math.max(0.3, t.w / PIXELS_PER_METER);
+        var dWorld = Math.max(0.3, t.d / PIXELS_PER_METER);
+        var topThickness = Math.min(Math.max(0.05, hWorld * 0.28), 0.14);
+        var legHeight = Math.max(0.05, hWorld - topThickness);
+
+        var topMaterial = new THREE.MeshStandardMaterial({
+            color: TABLE_TOP_COLOR, roughness: 0.55, metalness: 0.05
+        });
+        var legMaterial = new THREE.MeshStandardMaterial({
+            color: TABLE_LEG_COLOR, roughness: 0.72, metalness: 0.12
+        });
+
+        var topGeometry;
+        var legGeometry;
+        if (t.shape === "CIRCLE") {
+            topGeometry = new THREE.CylinderGeometry(wWorld / 2, wWorld / 2, topThickness, 40);
+            legGeometry = new THREE.CylinderGeometry(
+                Math.max(0.05, wWorld * 0.1), Math.max(0.06, wWorld * 0.13), legHeight, 18);
+        } else {
+            topGeometry = new RoundedBoxGeometry(
+                wWorld, topThickness, dWorld, 2, Math.min(0.05, topThickness / 2));
+            var legRadius = Math.max(0.05, Math.min(wWorld, dWorld) * 0.09);
+            legGeometry = new THREE.CylinderGeometry(legRadius, legRadius * 1.1, legHeight, 14);
+        }
+
+        var top = new THREE.Mesh(topGeometry, topMaterial);
+        top.position.y = legHeight + topThickness / 2;
+        top.castShadow = true;
+        top.receiveShadow = true;
+        group.add(top);
+
+        var leg = new THREE.Mesh(legGeometry, legMaterial);
+        leg.position.y = legHeight / 2;
+        leg.castShadow = true;
+        leg.receiveShadow = true;
+        group.add(leg);
+
+        var ringOuter = Math.max(wWorld, dWorld) * 0.72;
+        var ringGeometry = new THREE.RingGeometry(ringOuter * 0.86, ringOuter, 40);
+        ringGeometry.rotateX(-Math.PI / 2);
+        var ring = new THREE.Mesh(ringGeometry, new THREE.MeshBasicMaterial({
+            color: TABLE_SEL_COLOR, transparent: true, opacity: 0.95,
+            side: THREE.DoubleSide, depthWrite: false
+        }));
+        ring.position.y = 0.02;
+        ring.visible = false;
+        ring.renderOrder = 4;
+        ring.userData.isRing = true;
+        group.userData.ring = ring;
+        group.add(ring);
+        return group;
+    }
+
+    function updateTableTransforms(nextState) {
+        (nextState.tables || []).forEach(function (t) {
+            var group = tableByKey.get(t.key);
+            if (!group) { return; }
+            var cx = (t.x + t.w / 2) / PIXELS_PER_METER - worldWidth / 2;
+            var cz = (t.y + t.d / 2) / PIXELS_PER_METER - worldDepth / 2;
+            var yBase = (t.z || 0) / PIXELS_PER_METER;
+            group.position.set(cx, yBase, cz);
+            group.rotation.set(0, -THREE.MathUtils.degToRad(t.rot || 0), 0);
+            if (group.userData.ring) { group.userData.ring.visible = Boolean(t.selected); }
+        });
+    }
+
+    function disposeTables() {
+        tableEntries.forEach(function (group) {
+            group.traverse(function (obj) {
+                if (obj.geometry) { obj.geometry.dispose(); }
+                if (obj.material) {
+                    var materials = Array.isArray(obj.material) ? obj.material : [obj.material];
+                    materials.forEach(function (m) { m.dispose(); });
+                }
+            });
+            tableRoot.remove(group);
+        });
+        tableEntries = [];
+        tableByKey = new Map();
+    }
+
+    function pickTable(event) {
+        if (!tableRoot.children.length) { return null; }
+        updatePointer(event);
+        var hits = raycaster.intersectObjects(tableRoot.children, true);
+        for (var i = 0; i < hits.length; i++) {
+            var obj = hits[i].object;
+            if (obj.userData && obj.userData.isRing) { continue; }
+            while (obj) {
+                if (obj.userData && obj.userData.tableKey) { return obj.userData.tableKey; }
+                obj = obj.parent;
+            }
+        }
+        return null;
+    }
+
+    function handleTablePointerDown(event, tableKey) {
+        editor.select([]);
+        if (editor.selectTable) { editor.selectTable(tableKey); }
+        if (!state.editing) { return; }
+
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        updatePointer(event);
+        if (!raycaster.ray.intersectPlane(floorPlane, hitPoint)) { return; }
+
+        var tbl = null;
+        (state.tables || []).some(function (t) {
+            if (t.key === tableKey) { tbl = t; return true; }
+            return false;
+        });
+        if (!tbl) { return; }
+
+        tableDrag = {
+            pointerId: event.pointerId,
+            startWorldX: hitPoint.x,
+            startWorldZ: hitPoint.z,
+            key: tableKey,
+            ox: tbl.x,
+            oy: tbl.y,
+            lastPatch: null,
+            moved: false
+        };
+        controls.enabled = false;
+        host.classList.add("dragging");
+        renderer.domElement.setPointerCapture(event.pointerId);
+        window.addEventListener("pointermove", onTableDragMove, true);
+        window.addEventListener("pointerup", onTableDragEnd, true);
+        window.addEventListener("pointercancel", onTableDragEnd, true);
+    }
+
+    function onTableDragMove(event) {
+        if (!tableDrag || event.pointerId !== tableDrag.pointerId) { return; }
+        event.preventDefault();
+        updatePointer(event);
+        if (!raycaster.ray.intersectPlane(floorPlane, hitPoint)) { return; }
+
+        var dx = (hitPoint.x - tableDrag.startWorldX) * PIXELS_PER_METER;
+        var dy = (hitPoint.z - tableDrag.startWorldZ) * PIXELS_PER_METER;
+        if (Math.abs(dx) + Math.abs(dy) > 0.8) { tableDrag.moved = true; }
+
+        var nx = tableDrag.ox + dx;
+        var ny = tableDrag.oy + dy;
+        if (!event.altKey) {
+            nx = Math.round(nx / SNAP_PIXELS) * SNAP_PIXELS;
+            ny = Math.round(ny / SNAP_PIXELS) * SNAP_PIXELS;
+        }
+        nx = Math.max(0, nx);
+        ny = Math.max(0, ny);
+        tableDrag.lastPatch = { key: tableDrag.key, x: nx, y: ny };
+
+        var previewState = Object.assign({}, state, {
+            tables: (state.tables || []).map(function (t) {
+                return t.key === tableDrag.key ? Object.assign({}, t, { x: nx, y: ny }) : t;
+            })
+        });
+        updateTableTransforms(previewState);
+        editor.applyTablePatch([tableDrag.lastPatch], { transient: true });
+    }
+
+    function onTableDragEnd(event) {
+        if (!tableDrag || event.pointerId !== tableDrag.pointerId) { return; }
+        var completed = tableDrag;
+        tableDrag = null;
+        window.removeEventListener("pointermove", onTableDragMove, true);
+        window.removeEventListener("pointerup", onTableDragEnd, true);
+        window.removeEventListener("pointercancel", onTableDragEnd, true);
+        if (renderer.domElement.hasPointerCapture(completed.pointerId)) {
+            renderer.domElement.releasePointerCapture(completed.pointerId);
+        }
+        controls.enabled = true;
+        host.classList.remove("dragging");
+        if (completed.moved && completed.lastPatch) {
+            editor.applyTablePatch([completed.lastPatch]);
+        } else {
+            updateTableTransforms(state);
+        }
+    }
+
     function updateSelectionStatus() {
         var selectedSeats = state.seats.filter(function (seat) {
             return state.selectedKeys.indexOf(seat.key) !== -1;
@@ -740,6 +971,7 @@ import { RoundedBoxGeometry } from "/vendor/three/RoundedBoxGeometry.js";
         resizeObserver.disconnect();
         renderer.setAnimationLoop(null);
         if (controls) { controls.dispose(); }
+        disposeTables();
         clearHall();
         if (keyLight && keyLight.shadow && typeof keyLight.shadow.dispose === "function") {
             keyLight.shadow.dispose();

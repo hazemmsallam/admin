@@ -5,6 +5,7 @@ import java.util.List;
 public record UpdateHallSeatsRequest(
         Integer layoutWidth,
         Integer layoutHeight,
-        List<SeatEditItem> seats
+        List<SeatEditItem> seats,
+        List<LayoutObjectItem> layoutObjects
 ) {
 }

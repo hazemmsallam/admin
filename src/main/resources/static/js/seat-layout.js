@@ -175,6 +175,7 @@
     function onSeatPointerDown(e) {
         if (!editing) { return; }
         e.preventDefault();
+        clearTableSelection();
         var el = e.currentTarget;
 
         if (e.shiftKey) { toggleInSelection(el); return; }
@@ -214,6 +215,7 @@
     function onCanvasPointerDown(e) {
         if (!editing || e.target !== canvas || e.button !== 0 || e.isPrimary === false) { return; }
         e.preventDefault();
+        clearTableSelection();
 
         var start = canvasPoint(e);
         var overlay = document.createElement("div");
@@ -971,6 +973,365 @@
     on("curveLeft", function () { curveSelection("x", -1); });
     on("curveRight", function () { curveSelection("x", 1); });
 
+    // --- Tables (non-bookable layout objects) --------------------------------
+    // Tables share the seat canvas coordinate space (x/y top-left, w = footprint width,
+    // d = footprint depth) so the same 2D/3D editor arranges both, but they are kept in a
+    // separate list with their own single-selection + inspector. They never enter seat
+    // selection, capacity or the booking flow — the Save payload sends them as `layoutObjects`.
+    var TABLE_SHAPES = { SQUARE: 1, RECTANGLE: 1, CIRCLE: 1 };
+    var T_MIN = 20, T_MAX = 600, T_H_MIN = 6, T_H_MAX = 300, T_Z_MAX = 400;
+    var T_DEF = {
+        SQUARE: { w: 90, d: 90 },
+        RECTANGLE: { w: 150, d: 84 },
+        CIRCLE: { w: 104, d: 104 }
+    };
+    var tableEls = [];
+    var tableSel = null;
+    var nextTableDraft = 1;
+    var savedTables = [];
+
+    var tableTools = document.getElementById("tableTools");
+    var tableInspector = document.getElementById("tableInspector");
+    var tSelLabel = document.getElementById("tSelLabel");
+    var tShape = document.getElementById("tShape");
+    var tName = document.getElementById("tName");
+    var tWidth = document.getElementById("tWidth");
+    var tWidthLabel = document.getElementById("tWidthLabel");
+    var tLength = document.getElementById("tLength");
+    var tLengthField = document.getElementById("tLengthField");
+    var tHeight = document.getElementById("tHeight");
+    var tElevation = document.getElementById("tElevation");
+    var tRotation = document.getElementById("tRotation");
+    var tRotVal = document.getElementById("tRotVal");
+
+    Array.prototype.slice.call(canvas.querySelectorAll(".table-chip")).forEach(function (el) {
+        el._tt = readTableEl(el);
+        ensureTableKey(el._tt);
+        tableEls.push(el);
+        renderTable(el);
+        el.addEventListener("pointerdown", onTablePointerDown);
+    });
+    savedTables = tableEls.map(function (el) { return copyTable(el._tt); });
+
+    function readTableEl(el) {
+        var shape = TABLE_SHAPES[el.dataset.shape] ? el.dataset.shape : "SQUARE";
+        var def = T_DEF[shape];
+        var t = {
+            id: hasVal(el.dataset.id) ? int(el.dataset.id, null) : null,
+            shape: shape,
+            label: el.dataset.label && el.dataset.label !== "null" ? el.dataset.label : "",
+            x: Math.max(0, int(el.dataset.x, 60)),
+            y: Math.max(0, int(el.dataset.y, 60)),
+            w: clamp(int(el.dataset.w, def.w), T_MIN, T_MAX),
+            d: clamp(int(el.dataset.d, def.d), T_MIN, T_MAX),
+            z: clamp(int(el.dataset.z, 0), 0, T_Z_MAX),
+            height: clamp(int(el.dataset.height, 40), T_H_MIN, T_H_MAX),
+            rot: clamp(int(el.dataset.rot, 0), -180, 180)
+        };
+        if (shape !== "RECTANGLE") { t.d = t.w; }
+        return t;
+    }
+
+    function renderTable(el) {
+        var t = el._tt;
+        if (t.shape !== "RECTANGLE") { t.d = t.w; }
+        el.style.left = t.x + "px";
+        el.style.top = t.y + "px";
+        el.style.width = t.w + "px";
+        el.style.height = t.d + "px";
+        el.style.transform = "rotate(" + t.rot + "deg)";
+        el.className = "table-chip " + t.shape + (el === tableSel ? " selected" : "");
+        el.textContent = t.label ? t.label : "Table";
+        el.title = (t.label ? t.label + " — " : "") + "Table (" + t.shape.toLowerCase() + ")";
+    }
+
+    function onTablePointerDown(e) {
+        if (!editing) { return; }
+        e.preventDefault();
+        e.stopPropagation();
+        var el = e.currentTarget;
+        selectTable(el);
+
+        var rect = canvas.getBoundingClientRect();
+        var scaleX = rect.width / W || 1;
+        var scaleY = rect.height / H || 1;
+        var startX = e.clientX, startY = e.clientY;
+        var ox = el._tt.x, oy = el._tt.y;
+
+        el.setPointerCapture(e.pointerId);
+        function move(ev) {
+            el._tt.x = Math.max(0, Math.round(ox + (ev.clientX - startX) / scaleX));
+            el._tt.y = Math.max(0, Math.round(oy + (ev.clientY - startY) / scaleY));
+            renderTable(el);
+            ensureTableFits(el._tt);
+        }
+        function up() {
+            el.releasePointerCapture(e.pointerId);
+            el.removeEventListener("pointermove", move);
+            el.removeEventListener("pointerup", up);
+            markDirty();
+        }
+        el.addEventListener("pointermove", move);
+        el.addEventListener("pointerup", up);
+    }
+
+    function selectTable(el) {
+        if (selection.length) { setSelection([]); }
+        var prev = tableSel;
+        tableSel = el;
+        if (prev && prev !== el) { renderTable(prev); }
+        if (el) { renderTable(el); }
+        refreshTableInspector();
+        notifyBridge("tableSelection");
+    }
+
+    function clearTableSelection() {
+        if (!tableSel) { return; }
+        var prev = tableSel;
+        tableSel = null;
+        renderTable(prev);
+        refreshTableInspector();
+        notifyBridge("tableSelection");
+    }
+
+    function refreshTableInspector() {
+        if (!tableInspector) { return; }
+        if (!tableSel || !editing) { tableInspector.classList.add("hidden"); return; }
+        tableInspector.classList.remove("hidden");
+        var t = tableSel._tt;
+        tSelLabel.textContent = (t.label ? t.label : "Table") + "  (" + t.shape.toLowerCase() + ")";
+        if (tShape) { tShape.value = t.shape; }
+        if (tName) { tName.value = t.label; }
+        if (tWidth) { tWidth.value = t.w; }
+        if (tLength) { tLength.value = t.d; }
+        if (tHeight) { tHeight.value = t.height; }
+        if (tElevation) { tElevation.value = t.z; }
+        if (tRotation) { tRotation.value = t.rot; }
+        if (tRotVal) { tRotVal.textContent = t.rot; }
+        applyShapeUiHints(t.shape);
+    }
+
+    function applyShapeUiHints(shape) {
+        if (tLengthField) { tLengthField.classList.toggle("hidden", shape !== "RECTANGLE"); }
+        if (tWidthLabel) {
+            tWidthLabel.textContent = shape === "CIRCLE" ? "Diameter (px)"
+                : (shape === "SQUARE" ? "Size (px)" : "Width (px)");
+        }
+    }
+
+    if (tShape) {
+        tShape.addEventListener("change", function () {
+            if (!tableSel) { return; }
+            var t = tableSel._tt;
+            t.shape = TABLE_SHAPES[tShape.value] ? tShape.value : "SQUARE";
+            if (t.shape !== "RECTANGLE") { t.d = t.w; }
+            renderTable(tableSel);
+            refreshTableInspector();
+            ensureTableFits(t);
+            markDirty();
+        });
+    }
+    if (tName) {
+        tName.addEventListener("input", function () {
+            if (!tableSel) { return; }
+            tableSel._tt.label = tName.value.slice(0, 80);
+            renderTable(tableSel);
+            markDirty();
+        });
+    }
+    if (tWidth) {
+        tWidth.addEventListener("change", function () {
+            if (!tableSel) { return; }
+            var v = clamp(int(tWidth.value, 90), T_MIN, T_MAX);
+            tWidth.value = v;
+            var t = tableSel._tt;
+            t.w = v;
+            if (t.shape !== "RECTANGLE") { t.d = v; if (tLength) { tLength.value = v; } }
+            renderTable(tableSel);
+            ensureTableFits(t);
+            markDirty();
+        });
+    }
+    if (tLength) {
+        tLength.addEventListener("change", function () {
+            if (!tableSel) { return; }
+            var v = clamp(int(tLength.value, 84), T_MIN, T_MAX);
+            tLength.value = v;
+            var t = tableSel._tt;
+            t.d = v;
+            if (t.shape !== "RECTANGLE") { t.w = v; if (tWidth) { tWidth.value = v; } }
+            renderTable(tableSel);
+            ensureTableFits(t);
+            markDirty();
+        });
+    }
+    if (tHeight) {
+        tHeight.addEventListener("change", function () {
+            if (!tableSel) { return; }
+            tableSel._tt.height = clamp(int(tHeight.value, 40), T_H_MIN, T_H_MAX);
+            tHeight.value = tableSel._tt.height;
+            markDirty();
+        });
+    }
+    if (tElevation) {
+        tElevation.addEventListener("change", function () {
+            if (!tableSel) { return; }
+            tableSel._tt.z = clamp(int(tElevation.value, 0), 0, T_Z_MAX);
+            tElevation.value = tableSel._tt.z;
+            markDirty();
+        });
+    }
+    if (tRotation) {
+        tRotation.addEventListener("input", function () {
+            if (!tableSel) { return; }
+            var v = clamp(int(tRotation.value, 0), -180, 180);
+            if (tRotVal) { tRotVal.textContent = v; }
+            tableSel._tt.rot = v;
+            renderTable(tableSel);
+            markDirty();
+        });
+    }
+
+    function addTable(shape) {
+        var def = T_DEF[shape] || T_DEF.SQUARE;
+        var el = document.createElement("span");
+        el._tt = {
+            id: null,
+            shape: shape,
+            label: "",
+            x: Math.max(0, Math.round(W / 2 - def.w / 2)),
+            y: Math.max(0, Math.round(H / 2 - def.d / 2)),
+            w: def.w,
+            d: def.d,
+            z: 0,
+            height: 40,
+            rot: 0
+        };
+        ensureTableKey(el._tt);
+        el.addEventListener("pointerdown", onTablePointerDown);
+        canvas.appendChild(el);
+        tableEls.push(el);
+        renderTable(el);
+        ensureTableFits(el._tt);
+        selectTable(el);
+        structureChanged = true;
+        markDirty();
+    }
+    on("btnAddSquare", function () { addTable("SQUARE"); });
+    on("btnAddRect", function () { addTable("RECTANGLE"); });
+    on("btnAddCircle", function () { addTable("CIRCLE"); });
+    on("btnDelTable", function () {
+        if (!tableSel) {
+            statusEl.textContent = "Select a table to delete.";
+            statusEl.className = "layout-status";
+            return;
+        }
+        var el = tableSel;
+        tableSel = null;
+        var i = tableEls.indexOf(el);
+        if (i !== -1) { tableEls.splice(i, 1); }
+        el.remove();
+        refreshTableInspector();
+        structureChanged = true;
+        markDirty();
+        notifyBridge("tableSelection");
+    });
+
+    function ensureTableFits(t) {
+        ensureCanvasFits([{ x: t.x, y: t.y, w: t.w, h: t.d, rot: t.rot }]);
+    }
+
+    function ensureTableKey(t) {
+        if (!t.key) { t.key = t.id != null ? "table:" + t.id : "tdraft:" + nextTableDraft++; }
+        return t.key;
+    }
+
+    function copyTable(t) {
+        return {
+            id: t.id, shape: t.shape, label: t.label, x: t.x, y: t.y,
+            w: t.w, d: t.d, z: t.z, height: t.height, rot: t.rot, key: t.key
+        };
+    }
+
+    function findTableByKey(key) {
+        for (var i = 0; i < tableEls.length; i++) {
+            if (ensureTableKey(tableEls[i]._tt) === key) { return tableEls[i]; }
+        }
+        return null;
+    }
+
+    function tableSnapshot() {
+        return tableEls.map(function (el) {
+            var t = el._tt;
+            return {
+                key: ensureTableKey(t), id: t.id, shape: t.shape, label: t.label,
+                x: t.x, y: t.y, w: t.w, d: t.d, z: t.z, height: t.height, rot: t.rot,
+                selected: el === tableSel
+            };
+        });
+    }
+
+    function tablePayload() {
+        return tableEls.map(function (el) {
+            var t = el._tt;
+            return {
+                id: t.id,
+                objectType: "TABLE",
+                shape: t.shape,
+                label: t.label ? t.label : null,
+                layoutX: t.x,
+                layoutY: t.y,
+                layoutZ: t.z,
+                rotationDegrees: t.rot,
+                layoutWidth: t.w,
+                layoutDepth: t.d,
+                objectHeight: t.height
+            };
+        });
+    }
+
+    function makeTableEl(tt) {
+        var el = document.createElement("span");
+        el._tt = tt;
+        ensureTableKey(el._tt);
+        el.addEventListener("pointerdown", onTablePointerDown);
+        canvas.appendChild(el);
+        tableEls.push(el);
+        renderTable(el);
+        return el;
+    }
+
+    function restoreTables() {
+        tableEls.forEach(function (el) { el.remove(); });
+        tableEls = [];
+        tableSel = null;
+        savedTables.forEach(function (st) { makeTableEl(copyTable(st)); });
+        refreshTableInspector();
+    }
+
+    function rebuildTablesFromResponse(hall) {
+        tableEls.forEach(function (el) { el.remove(); });
+        tableEls = [];
+        tableSel = null;
+        (hall.layoutObjects || []).forEach(function (o) {
+            var shape = TABLE_SHAPES[o.shape] ? o.shape : "SQUARE";
+            makeTableEl({
+                id: o.id,
+                shape: shape,
+                label: o.label || "",
+                x: Math.max(0, int(o.layoutX, 0)),
+                y: Math.max(0, int(o.layoutY, 0)),
+                w: clamp(int(o.layoutWidth, T_DEF[shape].w), T_MIN, T_MAX),
+                d: clamp(int(o.layoutDepth, T_DEF[shape].d), T_MIN, T_MAX),
+                z: clamp(int(o.layoutZ, 0), 0, T_Z_MAX),
+                height: clamp(int(o.objectHeight, 40), T_H_MIN, T_H_MAX),
+                rot: clamp(int(o.rotationDegrees, 0), -180, 180)
+            });
+        });
+        savedTables = tableEls.map(function (el) { return copyTable(el._tt); });
+        refreshTableInspector();
+    }
+
     // --- Mode switching ------------------------------------------------------
     function setEditing(on) {
         editing = on;
@@ -980,14 +1341,17 @@
         btnCancel.classList.toggle("hidden", !on);
         tools.classList.toggle("hidden", !on);
         if (bulkGridTools) { bulkGridTools.classList.toggle("hidden", !on); }
+        if (tableTools) { tableTools.classList.toggle("hidden", !on); }
         arrangeTools.classList.toggle("hidden", !on);
         hintEl.textContent = on
-            ? "Drag to move. Shift-click to select several, then align, distribute, snap to grid, or rotate the group as one."
+            ? "Drag to move. Shift-click to select several, then align, distribute, snap to grid, or rotate the group as one. Add tables (non-bookable) from the Tables toolbar."
             : "";
         if (!on) {
             if (marquee) { cleanupMarquee(); }
             setSelection([]);
+            clearTableSelection();
         }
+        refreshTableInspector();
         notifyBridge("mode");
     }
 
@@ -1014,6 +1378,7 @@
             el._st = copy(savedState[i]);
             render(el);
         });
+        restoreTables();
         setCanvasSize(savedCanvas.width, savedCanvas.height);
         setEditing(false);
         statusEl.textContent = "";
@@ -1041,7 +1406,8 @@
                     layoutHeight: s.h,
                     sectionName: s.section ? s.section : null
                 };
-            })
+            }),
+            layoutObjects: tablePayload()
         };
 
         var headers = { "Content-Type": "application/json" };
@@ -1077,6 +1443,7 @@
                     el.dataset.id = id;
                 }
             });
+            rebuildTablesFromResponse(hall);
             savedState = chips.map(function (el) { return copy(el._st); });
             savedCanvas = { width: W, height: H };
             structureChanged = false;
@@ -1111,7 +1478,8 @@
                 var seat = copy(el._st);
                 seat.key = ensureSeatKey(el._st);
                 return seat;
-            })
+            }),
+            tables: tableSnapshot()
         };
     }
 
@@ -1152,7 +1520,43 @@
                 seen[key] = true;
                 return true;
             });
+            if (list.length) { clearTableSelection(); }
             setSelection(list);
+        },
+        getTables: tableSnapshot,
+        selectTable: function (key) {
+            if (!key) { clearTableSelection(); return; }
+            var el = findTableByKey(key);
+            if (el) { selectTable(el); }
+        },
+        applyTablePatch: function (patches, options) {
+            if (!editing) { return false; }
+            var changed = false;
+            var changedStates = [];
+            (patches || []).forEach(function (patch) {
+                var el = findTableByKey(patch.key);
+                if (!el) { return; }
+                if (typeof patch.x === "number" && isFinite(patch.x)) {
+                    el._tt.x = Math.max(0, Math.round(patch.x));
+                    changed = true;
+                }
+                if (typeof patch.y === "number" && isFinite(patch.y)) {
+                    el._tt.y = Math.max(0, Math.round(patch.y));
+                    changed = true;
+                }
+                if (typeof patch.rot === "number" && isFinite(patch.rot)) {
+                    el._tt.rot = clamp(Math.round(patch.rot), -180, 180);
+                    changed = true;
+                }
+                renderTable(el);
+                changedStates.push(el._tt);
+            });
+            if (changed) {
+                changedStates.forEach(ensureTableFits);
+                refreshTableInspector();
+                if (!(options && options.transient)) { markDirty(); }
+            }
+            return changed;
         },
         applySpatialPatch: function (patches, options) {
             if (!editing) { return false; }
