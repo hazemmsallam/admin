@@ -13,6 +13,7 @@ public record HallResponse(
         String numberingScheme,
         Integer layoutWidth,
         Integer layoutHeight,
-        List<SeatResponse> seats
+        List<SeatResponse> seats,
+        List<LayoutObjectResponse> layoutObjects
 ) {
 }

@@ -40,6 +40,7 @@
                     <span><i class="seat-dot VIP"></i>VIP</span>
                     <span><i class="seat-dot PREMIUM"></i>Premium</span>
                     <span><i class="seat-dot REGULAR"></i>Regular</span>
+                    <span><i class="seat-dot TABLE"></i>Table</span>
                 </div>
             </div>
         </div>
@@ -121,6 +122,55 @@
             <button type="button" id="curveRight" class="btn secondary small" title="Bow the column right">Right</button>
         </div>
 
+        <div class="layout-tools hidden" id="tableTools" aria-label="Tables (non-bookable)">
+            <span class="tools-label">Tables</span>
+            <button type="button" id="btnAddSquare" class="btn secondary small">+ Square</button>
+            <button type="button" id="btnAddRect" class="btn secondary small">+ Rectangle</button>
+            <button type="button" id="btnAddCircle" class="btn secondary small">+ Circle</button>
+            <span class="tools-sep"></span>
+            <button type="button" id="btnDelTable" class="btn danger small">Delete table</button>
+            <span class="muted tools-note">Tables are decoration only — never bookable.</span>
+        </div>
+
+        <div class="inspector hidden" id="tableInspector">
+            <div>
+                <label>Table</label>
+                <div class="sel-label" id="tSelLabel">—</div>
+            </div>
+            <div>
+                <label for="tShape">Shape</label>
+                <select id="tShape">
+                    <option value="SQUARE">Square</option>
+                    <option value="RECTANGLE">Rectangle</option>
+                    <option value="CIRCLE">Circle</option>
+                </select>
+            </div>
+            <div>
+                <label for="tName">Name / label</label>
+                <input type="text" id="tName" maxlength="80" placeholder="e.g. Head table"/>
+            </div>
+            <div>
+                <label for="tWidth" id="tWidthLabel">Size (px)</label>
+                <input type="number" id="tWidth" min="20" max="600" step="1" value="90"/>
+            </div>
+            <div id="tLengthField" class="hidden">
+                <label for="tLength">Length (px)</label>
+                <input type="number" id="tLength" min="20" max="600" step="1" value="84"/>
+            </div>
+            <div>
+                <label for="tHeight">Height (px)</label>
+                <input type="number" id="tHeight" min="6" max="300" step="1" value="40"/>
+            </div>
+            <div>
+                <label for="tElevation">Elevation Z (px)</label>
+                <input type="number" id="tElevation" min="0" max="400" step="1" value="0"/>
+            </div>
+            <div>
+                <label for="tRotation">Rotation <span id="tRotVal">0</span>°</label>
+                <input type="range" id="tRotation" min="-180" max="180" step="1" value="0"/>
+            </div>
+        </div>
+
         <div class="inspector hidden" id="inspector">
             <div>
                 <label>Selection</label>
@@ -170,6 +220,16 @@
                                data-label=${s.label()}, data-rowlabel=${s.rowLabel()}"
                       th:title="|${s.label()} - ${s.seatType()}|"
                       th:text="${s.label()}">A1</span>
+                <span th:each="t : ${hall.layoutObjects()}"
+                      class="table-chip"
+                      th:classappend="${t.shape()}"
+                      th:attr="data-id=${t.id()}, data-shape=${t.shape()},
+                               data-x=${t.layoutX()}, data-y=${t.layoutY()},
+                               data-w=${t.layoutWidth()}, data-d=${t.layoutDepth()},
+                               data-z=${t.layoutZ()}, data-height=${t.objectHeight()},
+                               data-rot=${t.rotationDegrees()}, data-label=${t.label()}"
+                      th:title="${t.label()} ?: 'Table'"
+                      th:text="${t.label()} ?: 'Table'">Table</span>
             </div>
         </div>
 
@@ -187,7 +247,7 @@
   }
 }
 </script>
-<script th:src="@{/js/seat-layout.js(v=4)}"></script>
-<script type="module" th:src="@{/js/hall-3d.js(v=4)}"></script>
+<script th:src="@{/js/seat-layout.js(v=5)}"></script>
+<script type="module" th:src="@{/js/hall-3d.js(v=5)}"></script>
 </body>
 </html>
