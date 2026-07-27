@@ -128,10 +128,17 @@ import { RoundedBoxGeometry } from "/vendor/three/RoundedBoxGeometry.js";
     var TABLE_LEG_COLOR = 0x4a3421;
     var TABLE_SEL_COLOR = 0xffc857;
 
+    // Section boundaries drawn as coloured floor outlines.
+    var sectionRoot = new THREE.Group();
+    sectionRoot.name = "sections";
+    scene.add(sectionRoot);
+    var sectionSig = "";
+
     buildLighting();
     buildHall();
     rebuildSeats(state);
     rebuildTables(state);
+    rebuildSections(state);
     setCameraMode("perspective", true);
     resize();
     renderer.setAnimationLoop(renderFrame);
@@ -156,6 +163,7 @@ import { RoundedBoxGeometry } from "/vendor/three/RoundedBoxGeometry.js";
             updateSeatTransforms(state);
         }
         syncTables(state);
+        if (sectionSignature(state.sections) !== sectionSig) { rebuildSections(state); }
         updateSelectionStatus();
         host.classList.toggle("editing", state.editing);
         if (dimensionsChanged && isThreeView) {
@@ -736,6 +744,44 @@ import { RoundedBoxGeometry } from "/vendor/three/RoundedBoxGeometry.js";
         } else {
             updateSeatTransforms(state);
         }
+    }
+
+    // --- Sections (floor boundaries) ----------------------------------------
+    function sectionSignature(list) {
+        return (list || []).map(function (s) {
+            return s.key + ":" + (s.points || []).map(function (p) { return p.x + "," + p.y; }).join(";") + ":" + s.color;
+        }).join("|");
+    }
+
+    function parseSectionColor(hex) {
+        if (!hex) { return 0x2e75dc; }
+        var v = hex.replace("#", "");
+        if (v.length === 3) { v = v[0] + v[0] + v[1] + v[1] + v[2] + v[2]; }
+        var n = parseInt(v, 16);
+        return isNaN(n) ? 0x2e75dc : n;
+    }
+
+    function rebuildSections(nextState) {
+        while (sectionRoot.children.length) {
+            var child = sectionRoot.children.pop();
+            if (child.geometry) { child.geometry.dispose(); }
+            if (child.material) { child.material.dispose(); }
+            sectionRoot.remove(child);
+        }
+        (nextState.sections || []).forEach(function (s) {
+            var pts = s.points || [];
+            if (pts.length < 2) { return; }
+            var verts = pts.map(function (p) {
+                return new THREE.Vector3(
+                    p.x / PIXELS_PER_METER - worldWidth / 2, 0.05,
+                    p.y / PIXELS_PER_METER - worldDepth / 2);
+            });
+            var geometry = new THREE.BufferGeometry().setFromPoints(verts);
+            var loop = new THREE.LineLoop(geometry,
+                new THREE.LineBasicMaterial({ color: parseSectionColor(s.color) }));
+            sectionRoot.add(loop);
+        });
+        sectionSig = sectionSignature(nextState.sections);
     }
 
     // --- Tables (non-bookable) ----------------------------------------------

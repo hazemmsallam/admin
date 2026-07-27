@@ -14,6 +14,7 @@ public record HallResponse(
         Integer layoutWidth,
         Integer layoutHeight,
         List<SeatResponse> seats,
-        List<LayoutObjectResponse> layoutObjects
+        List<LayoutObjectResponse> layoutObjects,
+        List<SectionResponse> sections
 ) {
 }

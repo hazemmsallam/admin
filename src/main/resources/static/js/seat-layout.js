@@ -1407,7 +1407,8 @@
                     sectionName: s.section ? s.section : null
                 };
             }),
-            layoutObjects: tablePayload()
+            layoutObjects: tablePayload(),
+            sections: window.HallSectionEditor ? window.HallSectionEditor.serialize() : null
         };
 
         var headers = { "Content-Type": "application/json" };
@@ -1444,6 +1445,7 @@
                 }
             });
             rebuildTablesFromResponse(hall);
+            if (window.HallSectionEditor) { window.HallSectionEditor.applyServerIds(hall.sections); }
             savedState = chips.map(function (el) { return copy(el._st); });
             savedCanvas = { width: W, height: H };
             structureChanged = false;
@@ -1479,7 +1481,8 @@
                 seat.key = ensureSeatKey(el._st);
                 return seat;
             }),
-            tables: tableSnapshot()
+            tables: tableSnapshot(),
+            sections: window.HallSectionEditor ? window.HallSectionEditor.getSections() : []
         };
     }
 
@@ -1592,6 +1595,10 @@
 
     notifyBridge("ready");
     window.dispatchEvent(new CustomEvent("hall-seat-editor-ready"));
+
+    // Section overlay lives in its own module; when it changes, re-publish the snapshot so the
+    // 3D view (which subscribes to this bridge) redraws section boundaries.
+    window.addEventListener("hall-sections-change", function () { notifyBridge("sections"); });
 
     // --- helpers -------------------------------------------------------------
     function btnAddRow() { return document.getElementById("btnAddRow"); }

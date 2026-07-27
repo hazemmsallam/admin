@@ -2,5 +2,5 @@ package com.eventticketing.admin.client.dto;
 
 import java.math.BigDecimal;
 
-public record PricingResponse(String seatType, BigDecimal price) {
+public record PricingResponse(String seatType, Long sectionId, String sectionName, BigDecimal price) {
 }

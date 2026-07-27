@@ -132,6 +132,51 @@
             <span class="muted tools-note">Tables are decoration only — never bookable.</span>
         </div>
 
+        <div class="layout-actions">
+            <button type="button" id="btnSectionMode" class="btn small">Edit sections</button>
+            <span id="sectionStatus" class="muted"></span>
+        </div>
+
+        <div class="layout-tools hidden" id="sectionTools" aria-label="Sections">
+            <span class="tools-label">Sections</span>
+            <button type="button" id="btnSectionRect" class="btn secondary small">+ Rectangle</button>
+            <button type="button" id="btnSectionDraw" class="btn secondary small">Free-draw</button>
+            <button type="button" id="btnSectionFinish" class="btn small hidden">Finish</button>
+            <span class="tools-sep"></span>
+            <button type="button" id="btnSectionDelete" class="btn danger small">Delete section</button>
+            <span class="muted tools-note">Any name, any price. Drag the whole area or its points.</span>
+        </div>
+
+        <div class="inspector hidden" id="sectionInspector">
+            <div>
+                <label for="sxName">Section name</label>
+                <input type="text" id="sxName" maxlength="120" placeholder="e.g. Royal, Balcony Left"/>
+            </div>
+            <div>
+                <label for="sxMode">Booking mode</label>
+                <select id="sxMode">
+                    <option value="SEATED">Seated (chairs inside)</option>
+                    <option value="GENERAL_ADMISSION">General admission (capacity)</option>
+                </select>
+            </div>
+            <div>
+                <label for="sxPrice">Default price</label>
+                <input type="number" id="sxPrice" min="0" step="0.01" placeholder="optional"/>
+            </div>
+            <div>
+                <label for="sxCurrency">Currency</label>
+                <input type="text" id="sxCurrency" maxlength="8" placeholder="JOD"/>
+            </div>
+            <div id="sxCapacityField" class="hidden">
+                <label for="sxCapacity">Capacity</label>
+                <input type="number" id="sxCapacity" min="1" step="1" placeholder="e.g. 500"/>
+            </div>
+            <div>
+                <label for="sxColor">Colour</label>
+                <input type="color" id="sxColor" value="#2E75DC"/>
+            </div>
+        </div>
+
         <div class="inspector hidden" id="tableInspector">
             <div>
                 <label>Table</label>
@@ -247,7 +292,9 @@
   }
 }
 </script>
-<script th:src="@{/js/seat-layout.js(v=5)}"></script>
-<script type="module" th:src="@{/js/hall-3d.js(v=5)}"></script>
+<script id="sectionsData" type="application/json" th:utext="${sectionsJson}">[]</script>
+<script th:src="@{/js/seat-layout.js(v=6)}"></script>
+<script th:src="@{/js/section-layout.js(v=6)}"></script>
+<script type="module" th:src="@{/js/hall-3d.js(v=6)}"></script>
 </body>
 </html>

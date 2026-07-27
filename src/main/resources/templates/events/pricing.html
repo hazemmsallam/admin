@@ -13,19 +13,55 @@
 
     <div class="card">
         <form th:object="${pricing}" method="post" th:action="@{/events/{id}/pricing(id=${event.id()})}">
-            <div th:if="${event.hall() != null and event.hall().seated()}">
-                <p class="muted">Enter a price for each seat type the hall uses. Leave a type blank if it isn't present.</p>
-                <div class="row">
-                    <div class="field"><label>VIP price</label><input type="number" step="0.01" min="0" th:field="*{vipPrice}"/></div>
-                    <div class="field"><label>Premium price</label><input type="number" step="0.01" min="0" th:field="*{premiumPrice}"/></div>
-                    <div class="field"><label>Regular price</label><input type="number" step="0.01" min="0" th:field="*{regularPrice}"/></div>
-                </div>
+            <!-- Dynamic per-section pricing: any section name, any price. -->
+            <div th:if="${hall.sections() != null and !hall.sections().isEmpty()}">
+                <p class="muted">Set the price for each section of
+                    <strong th:text="${hall.name()}">hall</strong>. Section names and prices are
+                    fully configurable — no fixed categories.</p>
+                <table class="table">
+                    <thead>
+                    <tr><th>Section</th><th>Type</th><th style="width:180px">Price</th><th>Currency</th></tr>
+                    </thead>
+                    <tbody>
+                    <tr th:each="row, i : *{sections}">
+                        <td>
+                            <span th:text="${row.name}">Section</span>
+                            <input type="hidden" th:field="*{sections[__${i.index}__].sectionId}"/>
+                            <input type="hidden" th:field="*{sections[__${i.index}__].name}"/>
+                        </td>
+                        <td>
+                            <span class="badge"
+                                  th:text="${row.bookingMode == 'GENERAL_ADMISSION'} ? 'General admission' : 'Seated'">Seated</span>
+                        </td>
+                        <td>
+                            <input type="number" step="0.01" min="0"
+                                   th:field="*{sections[__${i.index}__].price}"/>
+                        </td>
+                        <td>
+                            <input type="text" maxlength="8" style="width:80px"
+                                   th:field="*{sections[__${i.index}__].currency}"/>
+                        </td>
+                    </tr>
+                    </tbody>
+                </table>
             </div>
-            <div th:unless="${event.hall() != null and event.hall().seated()}">
-                <p class="muted">General-admission event — set a single admission price.</p>
-                <div class="field" style="max-width:240px">
-                    <label>General admission price</label>
-                    <input type="number" step="0.01" min="0" th:field="*{generalPrice}"/>
+
+            <!-- Legacy fallback for halls that have no sections yet. -->
+            <div th:unless="${hall.sections() != null and !hall.sections().isEmpty()}">
+                <div th:if="${event.hall() != null and event.hall().seated()}">
+                    <p class="muted">This hall has no sections yet. Draw sections in the hall editor, or set legacy seat-type prices below.</p>
+                    <div class="row">
+                        <div class="field"><label>VIP price</label><input type="number" step="0.01" min="0" th:field="*{vipPrice}"/></div>
+                        <div class="field"><label>Premium price</label><input type="number" step="0.01" min="0" th:field="*{premiumPrice}"/></div>
+                        <div class="field"><label>Regular price</label><input type="number" step="0.01" min="0" th:field="*{regularPrice}"/></div>
+                    </div>
+                </div>
+                <div th:unless="${event.hall() != null and event.hall().seated()}">
+                    <p class="muted">General-admission event — set a single admission price.</p>
+                    <div class="field" style="max-width:240px">
+                        <label>General admission price</label>
+                        <input type="number" step="0.01" min="0" th:field="*{generalPrice}"/>
+                    </div>
                 </div>
             </div>
             <button type="submit" class="btn">Save pricing</button>
