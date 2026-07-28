@@ -10,7 +10,6 @@ public record SeatEditItem(
         String rowLabel,
         Integer rowIndex,
         Integer seatNumber,
-        String seatType,
         Integer layoutX,
         Integer layoutY,
         Integer rotationDegrees,

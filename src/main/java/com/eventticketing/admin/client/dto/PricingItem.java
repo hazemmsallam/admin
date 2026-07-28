@@ -2,6 +2,6 @@ package com.eventticketing.admin.client.dto;
 
 import java.math.BigDecimal;
 
-/** A price line: {@code sectionId} keys section pricing; {@code seatType} is the legacy fallback. */
-public record PricingItem(String seatType, Long sectionId, BigDecimal price) {
+/** A price override for one hall section. */
+public record PricingItem(Long sectionId, BigDecimal price) {
 }

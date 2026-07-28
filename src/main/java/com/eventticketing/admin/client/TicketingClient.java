@@ -2,11 +2,14 @@ package com.eventticketing.admin.client;
 
 import com.eventticketing.admin.client.dto.CreateEventRequest;
 import com.eventticketing.admin.client.dto.CreateHallRequest;
+import com.eventticketing.admin.client.dto.CreateLayoutPresetRequest;
 import com.eventticketing.admin.client.dto.CreateOrganizerRequest;
 import com.eventticketing.admin.client.dto.EventResponse;
 import com.eventticketing.admin.client.dto.EventSummaryResponse;
 import com.eventticketing.admin.client.dto.HallResponse;
 import com.eventticketing.admin.client.dto.HallSummaryResponse;
+import com.eventticketing.admin.client.dto.LayoutPresetResponse;
+import com.eventticketing.admin.client.dto.LayoutPresetSummaryResponse;
 import com.eventticketing.admin.client.dto.OrganizerResponse;
 import com.eventticketing.admin.client.dto.SetEventPricingRequest;
 import com.eventticketing.admin.client.dto.UpdateEventStatusRequest;
@@ -33,6 +36,9 @@ public class TicketingClient {
             new ParameterizedTypeReference<>() {
             };
     private static final ParameterizedTypeReference<List<EventSummaryResponse>> EVENT_LIST =
+            new ParameterizedTypeReference<>() {
+            };
+    private static final ParameterizedTypeReference<List<LayoutPresetSummaryResponse>> PRESET_LIST =
             new ParameterizedTypeReference<>() {
             };
 
@@ -122,5 +128,24 @@ public class TicketingClient {
 
     public void deleteEvent(Long id) {
         rest.delete().uri("/api/events/{id}", id).retrieve().toBodilessEntity();
+    }
+
+    // ---------------------------------------------------------------- layout presets
+
+    public List<LayoutPresetSummaryResponse> listLayoutPresets() {
+        return rest.get().uri("/api/layout-presets").retrieve().body(PRESET_LIST);
+    }
+
+    public LayoutPresetResponse getLayoutPreset(Long id) {
+        return rest.get().uri("/api/layout-presets/{id}", id).retrieve().body(LayoutPresetResponse.class);
+    }
+
+    public LayoutPresetResponse createLayoutPreset(CreateLayoutPresetRequest request) {
+        return rest.post().uri("/api/layout-presets").body(request).retrieve()
+                .body(LayoutPresetResponse.class);
+    }
+
+    public void deleteLayoutPreset(Long id) {
+        rest.delete().uri("/api/layout-presets/{id}", id).retrieve().toBodilessEntity();
     }
 }

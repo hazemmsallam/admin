@@ -36,20 +36,62 @@
                     <button type="button" id="view3d" role="tab"
                             aria-selected="false" aria-controls="threeView">3D hall</button>
                 </div>
-                <div class="layout-legend" aria-label="Seat type legend">
-                    <span><i class="seat-dot VIP"></i>VIP</span>
-                    <span><i class="seat-dot PREMIUM"></i>Premium</span>
-                    <span><i class="seat-dot REGULAR"></i>Regular</span>
+                <div class="layout-legend" aria-label="Layout legend">
+                    <span><i class="seat-dot SEAT"></i>Seat</span>
                     <span><i class="seat-dot TABLE"></i>Table</span>
+                    <span><i class="seat-dot SCREEN"></i>Screen</span>
                 </div>
             </div>
         </div>
 
         <div class="layout-actions">
-            <button type="button" id="btnEdit" class="btn small">Edit layout</button>
+            <button type="button" id="btnEdit" class="btn small">Edit mode</button>
             <button type="button" id="btnSave" class="btn small hidden">Save layout</button>
             <button type="button" id="btnCancel" class="btn secondary small hidden">Cancel</button>
+            <button type="button" id="btnExportLayout" class="btn secondary small">Export JSON</button>
+            <button type="button" id="btnImportLayout" class="btn secondary small hidden">Import JSON</button>
+            <input type="file" id="layoutImportFile" class="hidden"
+                   accept="application/json,.json" aria-label="Choose hall layout JSON"/>
             <span id="layoutStatus" class="layout-status"></span>
+        </div>
+
+        <div class="edit-tabs hidden" id="editTabs" role="tablist" aria-label="Editing tools">
+            <button type="button" class="edit-tab active" id="editTab1" data-tab="1" role="tab" aria-selected="true">Seats</button>
+            <button type="button" class="edit-tab" id="editTab2" data-tab="2" role="tab" aria-selected="false">Sections</button>
+            <button type="button" class="edit-tab" id="editTab3" data-tab="3" role="tab" aria-selected="false">Objects</button>
+            <button type="button" class="edit-tab" id="editTab4" data-tab="4" role="tab" aria-selected="false">Hall</button>
+        </div>
+
+        <div class="editor-command-bar hidden" id="selectionTools"
+             aria-label="Selection, clipboard, groups and presets">
+            <div class="editor-command-group" role="group" aria-label="Clipboard">
+                <span class="tools-label">Clipboard</span>
+                <button type="button" id="btnCopySelection" class="btn secondary small"
+                        title="Copy selection (Ctrl+C)">Copy</button>
+                <button type="button" id="btnPasteSelection" class="btn secondary small"
+                        title="Paste below the copied selection (Ctrl+V)">Paste</button>
+                <button type="button" id="btnDuplicateSelection" class="btn secondary small"
+                        title="Duplicate selection below (Ctrl+D)">Duplicate</button>
+            </div>
+            <div class="editor-command-group" role="group" aria-label="Selection groups">
+                <span class="tools-label">Selection</span>
+                <button type="button" id="btnSelectLayout" class="btn secondary small">Seats + sections</button>
+                <button type="button" id="btnGroupSelection" class="btn secondary small"
+                        title="Group selection (Ctrl+G)">Group</button>
+                <button type="button" id="btnUngroupSelection" class="btn secondary small"
+                        title="Ungroup selection (Ctrl+Shift+G)">Ungroup</button>
+            </div>
+            <div class="editor-command-group preset-command-group" role="group" aria-label="Reusable presets">
+                <span class="tools-label">Preset</span>
+                <button type="button" id="btnSavePreset" class="btn secondary small">Save selection</button>
+                <select id="presetPicker" class="preset-picker" aria-label="Saved presets">
+                    <option value="">Saved presets</option>
+                </select>
+                <button type="button" id="btnApplyPreset" class="btn secondary small">Apply</button>
+                <button type="button" id="btnDeletePreset" class="btn secondary small"
+                        title="Delete the selected preset" aria-label="Delete selected preset">X</button>
+            </div>
+            <span id="sectionStatus" class="editor-command-status muted" aria-live="polite"></span>
         </div>
 
         <div class="three-toolbar hidden" id="threeToolbar">
@@ -61,17 +103,23 @@
             <span id="threeSelection" class="three-selection">View only</span>
         </div>
 
-        <div class="layout-tools hidden" id="layoutTools">
+        <div class="layout-tools hidden" id="layoutTools" data-tab="1">
             <button type="button" id="btnAddRow" class="btn secondary small">+ Row</button>
             <button type="button" id="btnAddCol" class="btn secondary small">+ Column</button>
             <button type="button" id="btnAddSeat" class="btn secondary small">+ Seat</button>
+            <span class="tools-sep"></span>
+            <span class="tools-label">Select</span>
+            <button type="button" id="selectSeatRow" class="btn secondary small">Row</button>
+            <button type="button" id="selectSeatColumn" class="btn secondary small">Column</button>
+            <button type="button" id="selectSectionSeats" class="btn secondary small">Section seats</button>
+            <button type="button" id="selectAllSeats" class="btn secondary small">All seats</button>
             <span class="tools-sep"></span>
             <button type="button" id="btnDelSeat" class="btn danger small">Delete seat(s)</button>
             <button type="button" id="btnDelRow" class="btn danger small">Delete row</button>
             <button type="button" id="btnDelCol" class="btn danger small">Delete column</button>
         </div>
 
-        <div class="layout-tools grid-generator hidden" id="bulkGridTools" aria-label="Bulk seat grid">
+        <div class="layout-tools grid-generator hidden" id="bulkGridTools" aria-label="Bulk seat grid" data-tab="1">
             <span class="tools-label">Seat block</span>
             <label class="compact-field" for="gridColumns">
                 <span>Columns (X)</span>
@@ -82,18 +130,54 @@
                 <input type="number" id="gridRows" value="5" min="1" max="50" step="1" inputmode="numeric"/>
             </label>
             <label class="compact-field" for="gridGapX">
-                <span>Column gap</span>
+                <span>New block column gap</span>
                 <input type="number" id="gridGapX" value="16" min="0" max="160" step="1" inputmode="numeric"/>
             </label>
             <label class="compact-field" for="gridGapY">
-                <span>Row gap</span>
+                <span>New block row gap</span>
                 <input type="number" id="gridGapY" value="14" min="0" max="160" step="1" inputmode="numeric"/>
             </label>
             <span class="grid-fit-summary" id="gridFitSummary" aria-live="polite"></span>
             <button type="button" id="btnAddGrid" class="btn small">Generate seats</button>
         </div>
 
-        <div class="layout-tools hidden" id="arrangeTools">
+        <div class="layout-tools layout-size-tools hidden" id="canvasSizeTools"
+             aria-label="Hall layout size" data-tab="4">
+            <span class="tools-label">Hall size</span>
+            <label class="compact-field" for="canvasWidth">
+                <span>Width (px)</span>
+                <input type="number" id="canvasWidth" min="320" max="12000" step="20" inputmode="numeric"/>
+            </label>
+            <label class="compact-field" for="canvasHeight">
+                <span>Height (px)</span>
+                <input type="number" id="canvasHeight" min="240" max="12000" step="20" inputmode="numeric"/>
+            </label>
+            <button type="button" id="btnApplyCanvasSize" class="btn small">Apply size</button>
+            <button type="button" id="btnFitCanvas" class="btn secondary small">Fit contents</button>
+            <span class="grid-fit-summary" id="canvasSizeSummary" aria-live="polite"></span>
+        </div>
+
+        <div class="layout-tools arrange-tools hidden" id="arrangeTools"
+             aria-label="Arrange selected seats" data-tab="1">
+            <span class="tools-label">Exact spacing</span>
+            <label class="compact-field" for="selectionGapX">
+                <span>Column gap</span>
+                <input type="number" id="selectionGapX" min="0" max="1000" step="1"
+                       inputmode="numeric" placeholder="Mixed"/>
+            </label>
+            <label class="compact-field" for="selectionGapY">
+                <span>Row gap</span>
+                <input type="number" id="selectionGapY" min="0" max="1000" step="1"
+                       inputmode="numeric" placeholder="Mixed"/>
+            </label>
+            <div class="spacing-anchor" role="group" aria-label="Spacing anchor">
+                <button type="button" class="active" data-anchor="top-left"
+                        aria-pressed="true">Top-left</button>
+                <button type="button" data-anchor="center" aria-pressed="false">Center</button>
+            </div>
+            <button type="button" id="applySelectionSpacing" class="btn small">Apply spacing</button>
+            <span class="spacing-summary" id="selectionSpacingSummary" aria-live="polite"></span>
+            <span class="tools-sep"></span>
             <span class="tools-label">Align</span>
             <button type="button" id="alLeft" class="btn secondary small">Left</button>
             <button type="button" id="alCenterX" class="btn secondary small">Center</button>
@@ -103,8 +187,8 @@
             <button type="button" id="alBottom" class="btn secondary small">Bottom</button>
             <span class="tools-sep"></span>
             <span class="tools-label">Distribute</span>
-            <button type="button" id="distH" class="btn secondary small">Across</button>
-            <button type="button" id="distV" class="btn secondary small">Down</button>
+            <button type="button" id="distH" class="btn secondary small">Horizontally</button>
+            <button type="button" id="distV" class="btn secondary small">Vertically</button>
             <span class="tools-sep"></span>
             <button type="button" id="snapGrid" class="btn secondary small">Snap to grid</button>
             <button type="button" id="straighten" class="btn secondary small">Straighten</button>
@@ -122,32 +206,31 @@
             <button type="button" id="curveRight" class="btn secondary small" title="Bow the column right">Right</button>
         </div>
 
-        <div class="layout-tools hidden" id="tableTools" aria-label="Tables (non-bookable)">
-            <span class="tools-label">Tables</span>
+        <div class="layout-tools hidden" id="tableTools" aria-label="Layout objects (non-bookable)" data-tab="3">
+            <span class="tools-label">Objects</span>
             <button type="button" id="btnAddSquare" class="btn secondary small">+ Square</button>
             <button type="button" id="btnAddRect" class="btn secondary small">+ Rectangle</button>
             <button type="button" id="btnAddCircle" class="btn secondary small">+ Circle</button>
+            <button type="button" id="btnAddScreen" class="btn secondary small">+ Screen</button>
             <span class="tools-sep"></span>
-            <button type="button" id="btnDelTable" class="btn danger small">Delete table</button>
-            <span class="muted tools-note">Tables are decoration only — never bookable.</span>
+            <button type="button" id="btnDelTable" class="btn danger small">Delete object</button>
+            <span class="muted tools-note">Objects are visual only and never bookable.</span>
         </div>
 
-        <div class="layout-actions">
-            <button type="button" id="btnSectionMode" class="btn small">Edit sections</button>
-            <span id="sectionStatus" class="muted"></span>
-        </div>
-
-        <div class="layout-tools hidden" id="sectionTools" aria-label="Sections">
+        <div class="layout-tools hidden" id="sectionTools" aria-label="Sections" data-tab="2">
             <span class="tools-label">Sections</span>
             <button type="button" id="btnSectionRect" class="btn secondary small">+ Rectangle</button>
+            <button type="button" id="btnSectionCircle" class="btn secondary small">+ Circle</button>
+            <button type="button" id="btnSectionTriangle" class="btn secondary small">+ Triangle</button>
+            <button type="button" id="btnSectionCurve" class="btn secondary small">+ Curve</button>
             <button type="button" id="btnSectionDraw" class="btn secondary small">Free-draw</button>
             <button type="button" id="btnSectionFinish" class="btn small hidden">Finish</button>
             <span class="tools-sep"></span>
-            <button type="button" id="btnSectionDelete" class="btn danger small">Delete section</button>
-            <span class="muted tools-note">Any name, any price. Drag the whole area or its points.</span>
+            <button type="button" id="btnSectionDelete" class="btn danger small">Delete section(s)</button>
+            <span class="muted tools-note">Sections define seated or general-admission booking areas.</span>
         </div>
 
-        <div class="inspector hidden" id="sectionInspector">
+        <div class="inspector hidden" id="sectionInspector" data-tab="2">
             <div>
                 <label for="sxName">Section name</label>
                 <input type="text" id="sxName" maxlength="120" placeholder="e.g. Royal, Balcony Left"/>
@@ -158,10 +241,6 @@
                     <option value="SEATED">Seated (chairs inside)</option>
                     <option value="GENERAL_ADMISSION">General admission (capacity)</option>
                 </select>
-            </div>
-            <div>
-                <label for="sxPrice">Default price</label>
-                <input type="number" id="sxPrice" min="0" step="0.01" placeholder="optional"/>
             </div>
             <div>
                 <label for="sxCurrency">Currency</label>
@@ -177,12 +256,19 @@
             </div>
         </div>
 
-        <div class="inspector hidden" id="tableInspector">
+        <div class="inspector hidden" id="tableInspector" data-tab="3">
             <div>
-                <label>Table</label>
+                <label>Object</label>
                 <div class="sel-label" id="tSelLabel">—</div>
             </div>
             <div>
+                <label for="tObjectType">Type</label>
+                <select id="tObjectType">
+                    <option value="TABLE">Table</option>
+                    <option value="SCREEN">Screen / TV</option>
+                </select>
+            </div>
+            <div id="tShapeField">
                 <label for="tShape">Shape</label>
                 <select id="tShape">
                     <option value="SQUARE">Square</option>
@@ -199,15 +285,15 @@
                 <input type="number" id="tWidth" min="20" max="600" step="1" value="90"/>
             </div>
             <div id="tLengthField" class="hidden">
-                <label for="tLength">Length (px)</label>
+                <label for="tLength" id="tLengthLabel">Length (px)</label>
                 <input type="number" id="tLength" min="20" max="600" step="1" value="84"/>
             </div>
             <div>
-                <label for="tHeight">Height (px)</label>
+                <label for="tHeight" id="tHeightLabel">Height (px)</label>
                 <input type="number" id="tHeight" min="6" max="300" step="1" value="40"/>
             </div>
             <div>
-                <label for="tElevation">Elevation Z (px)</label>
+                <label for="tElevation" id="tElevationLabel">Elevation Z (px)</label>
                 <input type="number" id="tElevation" min="0" max="400" step="1" value="0"/>
             </div>
             <div>
@@ -216,18 +302,10 @@
             </div>
         </div>
 
-        <div class="inspector hidden" id="inspector">
+        <div class="inspector hidden" id="inspector" data-tab="1">
             <div>
                 <label>Selection</label>
                 <div class="sel-label" id="selLabel">—</div>
-            </div>
-            <div>
-                <label>Seat type</label>
-                <div class="type-seg" id="typeSeg">
-                    <button type="button" data-type="VIP">VIP</button>
-                    <button type="button" data-type="PREMIUM">Premium</button>
-                    <button type="button" data-type="REGULAR">Regular</button>
-                </div>
             </div>
             <div>
                 <label for="inSection">Section name</label>
@@ -249,32 +327,41 @@
 
         <p class="muted layout-hint" id="layoutHint"></p>
 
+        <aside class="group-outliner hidden" id="groupOutliner" aria-label="Groups">
+            <div class="group-outliner-head">
+                <span>Groups</span>
+                <span class="muted" id="groupOutlinerCount">0</span>
+            </div>
+            <div class="group-outliner-list" id="groupOutlinerList"></div>
+            <p class="muted group-outliner-empty" id="groupOutlinerEmpty">
+                Select items and press Ctrl+G to create a group.
+            </p>
+        </aside>
+
         <div class="seat-canvas-shell" id="planView" role="tabpanel" aria-labelledby="viewPlan">
             <div class="seat-canvas" id="seatCanvas"
-                 th:attr="data-w=${hall.layoutWidth()}, data-h=${hall.layoutHeight()},
+                 th:attr="data-hall-id=${hall.id()}, data-w=${hall.layoutWidth()}, data-h=${hall.layoutHeight()},
                           data-seats-url=@{/halls/{id}/seats(id=${hall.id()})}, data-cols=${hall.numColumns()}">
                 <div class="stage-abs">Stage</div>
                 <span th:each="s : ${hall.seats()}"
                       class="seat-chip"
-                      th:classappend="${s.seatType()}"
-                      th:attr="data-id=${s.id()}, data-type=${s.seatType()},
-                               data-x=${s.layoutX()}, data-y=${s.layoutY()},
+                      th:attr="data-id=${s.id()}, data-x=${s.layoutX()}, data-y=${s.layoutY()},
                                data-w=${s.layoutWidth()}, data-h=${s.layoutHeight()},
                                data-rot=${s.rotationDegrees()}, data-section=${s.sectionName()},
                                data-row=${s.rowIndex()}, data-col=${s.seatNumber()},
                                data-label=${s.label()}, data-rowlabel=${s.rowLabel()}"
-                      th:title="|${s.label()} - ${s.seatType()}|"
+                      th:title="${s.label()}"
                       th:text="${s.label()}">A1</span>
                 <span th:each="t : ${hall.layoutObjects()}"
                       class="table-chip"
-                      th:classappend="${t.shape()}"
-                      th:attr="data-id=${t.id()}, data-shape=${t.shape()},
+                      th:classappend="|${t.objectType()} ${t.shape()}|"
+                      th:attr="data-id=${t.id()}, data-object-type=${t.objectType()}, data-shape=${t.shape()},
                                data-x=${t.layoutX()}, data-y=${t.layoutY()},
                                data-w=${t.layoutWidth()}, data-d=${t.layoutDepth()},
                                data-z=${t.layoutZ()}, data-height=${t.objectHeight()},
                                data-rot=${t.rotationDegrees()}, data-label=${t.label()}"
-                      th:title="${t.label()} ?: 'Table'"
-                      th:text="${t.label()} ?: 'Table'">Table</span>
+                      th:title="${t.label()} ?: (${t.objectType() == 'SCREEN'} ? 'Screen' : 'Table')"
+                      th:text="${t.label()} ?: (${t.objectType() == 'SCREEN'} ? 'Screen' : 'Table')">Object</span>
             </div>
         </div>
 
@@ -293,8 +380,8 @@
 }
 </script>
 <script id="sectionsData" type="application/json" th:utext="${sectionsJson}">[]</script>
-<script th:src="@{/js/seat-layout.js(v=6)}"></script>
-<script th:src="@{/js/section-layout.js(v=6)}"></script>
-<script type="module" th:src="@{/js/hall-3d.js(v=6)}"></script>
+<script th:src="@{/js/seat-layout.js(v=14)}"></script>
+<script th:src="@{/js/section-layout.js(v=13)}"></script>
+<script type="module" th:src="@{/js/hall-3d.js(v=8)}"></script>
 </body>
 </html>

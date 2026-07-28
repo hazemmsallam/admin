@@ -13,7 +13,6 @@ public record SeatBuildItem(
         int rot,
         int w,
         int h,
-        String section,
-        String type
+        String section
 ) {
 }

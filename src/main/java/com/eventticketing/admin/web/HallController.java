@@ -4,7 +4,6 @@ import com.eventticketing.admin.client.TicketingApiException;
 import com.eventticketing.admin.client.TicketingClient;
 import com.eventticketing.admin.client.dto.CreateHallRequest;
 import com.eventticketing.admin.client.dto.HallResponse;
-import com.eventticketing.admin.client.dto.RowTypeRange;
 import com.eventticketing.admin.client.dto.SeatBuildItem;
 import com.eventticketing.admin.client.dto.SeatLayoutItem;
 import com.eventticketing.admin.client.dto.SeatResponse;
@@ -182,7 +181,7 @@ public class HallController {
                 Long seatId = idByKey.get(b.r() + ":" + b.c());
                 if (seatId != null) {
                     items.add(new SeatLayoutItem(seatId, b.x(), b.y(), b.rot(), b.w(), b.h(),
-                            blankToNull(b.section()), b.type()));
+                            blankToNull(b.section())));
                 }
             }
             if (items.isEmpty()) {
@@ -205,16 +204,9 @@ public class HallController {
     private CreateHallRequest toCreateRequest(HallForm form) {
         if (!form.isSeated()) {
             return new CreateHallRequest(form.getName(), form.getAddress(), false,
-                    null, null, null, null, form.getCapacity());
-        }
-        List<RowTypeRange> ranges = new ArrayList<>();
-        if (form.getVipFromRow() != null && form.getVipToRow() != null) {
-            ranges.add(new RowTypeRange(form.getVipFromRow(), form.getVipToRow(), "VIP"));
-        }
-        if (form.getPremiumFromRow() != null && form.getPremiumToRow() != null) {
-            ranges.add(new RowTypeRange(form.getPremiumFromRow(), form.getPremiumToRow(), "PREMIUM"));
+                    null, null, null, form.getCapacity());
         }
         return new CreateHallRequest(form.getName(), form.getAddress(), true,
-                form.getNumRows(), form.getNumColumns(), null, ranges, null);
+                form.getNumRows(), form.getNumColumns(), null, null);
     }
 }

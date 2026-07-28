@@ -7,7 +7,6 @@ public record SeatLayoutItem(
         Integer rotationDegrees,
         Integer layoutWidth,
         Integer layoutHeight,
-        String sectionName,
-        String seatType
+        String sectionName
 ) {
 }

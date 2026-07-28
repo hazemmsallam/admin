@@ -1,11 +1,10 @@
 /*
  * Interactive seat-layout builder for the hall CREATE page.
  *
- * Generates seats client-side from rows/columns (and the VIP/Premium row ranges) using the
- * same arc/fan geometry the backend would, then lets the admin drag them, shift-click to
- * multi-select, and assign VIP/Premium/Regular, rotation, size and section — before the hall
- * exists. The arrangement is serialised (keyed by row/column) into a hidden field and applied
- * by HallController after the hall and its seat IDs are created.
+ * Generates neutral seats client-side from rows/columns using the same arc/fan geometry the
+ * backend would, then lets the admin drag, resize, rotate and group them before the hall exists.
+ * The arrangement is serialised (keyed by row/column) into a hidden field and applied by
+ * HallController after the hall and its seat IDs are created.
  *
  * Sibling of seat-layout.js (which edits an existing hall's real seat IDs).
  */
@@ -24,13 +23,11 @@
     var hintEl = document.getElementById("layoutHint");
     var inspector = document.getElementById("inspector");
     var selLabel = document.getElementById("selLabel");
-    var typeSeg = document.getElementById("typeSeg");
     var inSection = document.getElementById("inSection");
     var inRotation = document.getElementById("inRotation");
     var rotVal = document.getElementById("rotVal");
     var inWidth = document.getElementById("inWidth");
     var inHeight = document.getElementById("inHeight");
-    var typeButtons = Array.prototype.slice.call(typeSeg.querySelectorAll("button"));
     var form = canvas.closest("form");
 
     // Must match the backend HallService constants.
@@ -73,16 +70,6 @@
         return s;
     }
 
-    // Premium overrides VIP on overlap (matches backend range order).
-    function typeForRow(r) {
-        var t = "REGULAR";
-        var vf = numField("vipFromRow"), vt = numField("vipToRow");
-        if (vf && vt && r >= vf && r <= vt) { t = "VIP"; }
-        var pf = numField("premiumFromRow"), pt = numField("premiumToRow");
-        if (pf && pt && r >= pf && r <= pt) { t = "PREMIUM"; }
-        return t;
-    }
-
     function isSelected(el2) { return selection.indexOf(el2) !== -1; }
 
     function render(chip) {
@@ -92,8 +79,8 @@
         chip.style.width = s.w + "px";
         chip.style.height = s.h + "px";
         chip.style.transform = "rotate(" + s.rot + "deg)";
-        chip.className = "seat-chip " + s.type + (isSelected(chip) ? " selected" : "");
-        chip.title = chip.textContent + " - " + s.type;
+        chip.className = "seat-chip" + (isSelected(chip) ? " selected" : "");
+        chip.title = chip.textContent;
     }
 
     function clampPos(chip) {
@@ -105,11 +92,11 @@
     function serialize() {
         hidden.value = JSON.stringify(chips.map(function (chip) {
             var s = chip._st;
-            return { r: s.r, c: s.c, x: s.x, y: s.y, rot: s.rot, w: s.w, h: s.h, section: s.section, type: s.type };
+            return { r: s.r, c: s.c, x: s.x, y: s.y, rot: s.rot, w: s.w, h: s.h, section: s.section };
         }));
     }
 
-    // --- (re)generate seats when dimensions or ranges change -----------------
+    // --- (re)generate seats when dimensions change ---------------------------
     function rebuild() {
         chips.forEach(function (c) { c.remove(); });
         chips = [];
@@ -146,7 +133,7 @@
 
         if (stage) { stage.style.display = "flex"; }
         note.textContent = "Generated " + (rows * cols) + " seats.";
-        hintEl.textContent = "Drag to reposition. Click a seat (shift-click for several) to set VIP/Premium/Regular, rotation, size or section.";
+        hintEl.textContent = "Drag to reposition. Click a seat (shift-click for several) to adjust rotation, size or section.";
 
         W = Math.max(820, cols * 64 + 360);
         H = Math.max(560, rows * 58 + 270);
@@ -159,7 +146,6 @@
 
         var frag = document.createDocumentFragment();
         for (var r = 1; r <= rows; r++) {
-            var type = typeForRow(r);
             for (var c = 1; c <= cols; c++) {
                 var arc = Math.round(Math.pow(c - center, 2) * 1.35);
                 var fan = Math.round((r - (rows + 1) / 2) * 3.0);
@@ -171,8 +157,7 @@
                     y: START_Y + (r - 1) * GAP_Y + arc,
                     w: SEAT_W, h: SEAT_H,
                     rot: Math.trunc(fan / 2),
-                    section: "",
-                    type: type
+                    section: ""
                 };
                 if (initialSaved) {
                     var saved = initialSaved[r + ":" + c];
@@ -183,7 +168,6 @@
                         chip._st.h = clamp(int(saved.h, SEAT_H), 12, 120);
                         chip._st.rot = clamp(int(saved.rot, 0), -180, 180);
                         chip._st.section = saved.section || "";
-                        chip._st.type = saved.type || chip._st.type;
                     }
                 }
                 clampPos(chip);
@@ -216,7 +200,7 @@
         if (!selection.length) { inspector.classList.add("hidden"); return; }
         inspector.classList.remove("hidden");
         selLabel.textContent = selection.length === 1
-            ? primary.textContent + "  (" + primary._st.type + ")"
+            ? primary.textContent
             : selection.length + " seats selected";
         var ref = primary || selection[0];
         inSection.value = ref._st.section;
@@ -224,10 +208,6 @@
         rotVal.textContent = ref._st.rot;
         inWidth.value = ref._st.w;
         inHeight.value = ref._st.h;
-        highlightType(ref._st.type);
-    }
-    function highlightType(type) {
-        typeButtons.forEach(function (b) { b.classList.toggle("active", b.dataset.type === type); });
     }
     function applyToSelection(fn) {
         selection.forEach(function (chip) { fn(chip); render(chip); });
@@ -279,14 +259,6 @@
     });
 
     // --- inspector controls --------------------------------------------------
-    typeButtons.forEach(function (btn) {
-        btn.addEventListener("click", function () {
-            var t = btn.dataset.type;
-            applyToSelection(function (chip) { chip._st.type = t; });
-            highlightType(t);
-            if (selection.length === 1) { selLabel.textContent = primary.textContent + "  (" + t + ")"; }
-        });
-    });
     inSection.addEventListener("input", function () {
         var v = inSection.value.trim();
         applyToSelection(function (chip) { chip._st.section = v; });
@@ -308,7 +280,7 @@
     });
 
     // --- wiring --------------------------------------------------------------
-    ["numRows", "numColumns", "vipFromRow", "vipToRow", "premiumFromRow", "premiumToRow", "seated"]
+    ["numRows", "numColumns", "seated"]
         .forEach(function (id) {
             var e = el(id);
             if (e) {

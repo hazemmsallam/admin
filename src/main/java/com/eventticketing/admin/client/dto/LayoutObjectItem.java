@@ -1,7 +1,7 @@
 package com.eventticketing.admin.client.dto;
 
 /**
- * One non-bookable layout object (e.g. a table) in a full-hall reconcile
+ * One non-bookable layout object (for example, a table or screen) in a full-hall reconcile
  * ({@code PUT /api/halls/{id}/seats}). A null {@code id} creates a new object; existing objects
  * left out of the request are deleted by the API. Enum-valued fields are kept as Strings, matching
  * the other client DTOs, so the console never needs the API's enum classes.

@@ -149,20 +149,13 @@ public class EventController {
         HallResponse hall = client.getHall(event.hall().id());
         List<PricingItem> items = new ArrayList<>();
 
-        boolean hasSections = hall.sections() != null && !hall.sections().isEmpty();
-        if (hasSections) {
+        if (hall.sections() != null) {
             // Dynamic per-section pricing — any section name, any price.
             for (PricingForm.SectionPriceRow row : form.getSections()) {
                 if (row != null && row.getSectionId() != null && row.getPrice() != null) {
-                    items.add(new PricingItem(null, row.getSectionId(), row.getPrice()));
+                    items.add(new PricingItem(row.getSectionId(), row.getPrice()));
                 }
             }
-        } else if (event.hall() != null && event.hall().seated()) {
-            addIfPresent(items, "VIP", form.getVipPrice());
-            addIfPresent(items, "PREMIUM", form.getPremiumPrice());
-            addIfPresent(items, "REGULAR", form.getRegularPrice());
-        } else if (form.getGeneralPrice() != null) {
-            items.add(new PricingItem(null, null, form.getGeneralPrice()));
         }
         try {
             client.setPricing(id, new SetEventPricingRequest(items));
@@ -208,17 +201,7 @@ public class EventController {
         java.util.Map<Long, BigDecimal> pricedBySection = new java.util.HashMap<>();
         if (event.pricing() != null) {
             for (PricingResponse p : event.pricing()) {
-                if (p.sectionId() != null) {
-                    pricedBySection.put(p.sectionId(), p.price());
-                } else if (p.seatType() == null) {
-                    form.setGeneralPrice(p.price());
-                } else switch (p.seatType()) {
-                    case "VIP" -> form.setVipPrice(p.price());
-                    case "PREMIUM" -> form.setPremiumPrice(p.price());
-                    case "REGULAR" -> form.setRegularPrice(p.price());
-                    default -> {
-                    }
-                }
+                pricedBySection.put(p.sectionId(), p.price());
             }
         }
 
@@ -229,18 +212,13 @@ public class EventController {
                 row.setName(section.name());
                 row.setBookingMode(section.bookingMode());
                 row.setCurrency(section.currency());
-                // Prefill with the event's configured price, else the section's default.
-                row.setPrice(pricedBySection.getOrDefault(section.id(), section.defaultPrice()));
+                // Prefill with this event's configured price; blank until the admin sets one,
+                // because a section has no price of its own.
+                row.setPrice(pricedBySection.get(section.id()));
                 form.getSections().add(row);
             }
         }
         return form;
-    }
-
-    private void addIfPresent(List<PricingItem> items, String seatType, BigDecimal price) {
-        if (price != null) {
-            items.add(new PricingItem(seatType, null, price));
-        }
     }
 
     private static Instant toInstant(String localDateTime) {

@@ -3,10 +3,7 @@ package com.eventticketing.admin.web.form;
 import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 
-/**
- * Hall creation form. For a seated hall provide rows/columns and optional VIP/Premium row
- * ranges (everything else defaults to Regular). For a non-seated hall provide a capacity.
- */
+/** Hall creation form. A seated hall starts with one section; non-seated halls use capacity. */
 @Data
 public class HallForm {
 
@@ -20,10 +17,6 @@ public class HallForm {
     // Seated layout
     private Integer numRows;
     private Integer numColumns;
-    private Integer vipFromRow;
-    private Integer vipToRow;
-    private Integer premiumFromRow;
-    private Integer premiumToRow;
 
     // Non-seated
     private Integer capacity;

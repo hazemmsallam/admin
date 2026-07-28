@@ -33,15 +33,7 @@
                     <div class="field"><label for="numRows">Rows</label><input type="number" id="numRows" th:field="*{numRows}" min="1"/></div>
                     <div class="field"><label for="numColumns">Columns (seats per row)</label><input type="number" id="numColumns" th:field="*{numColumns}" min="1"/></div>
                 </div>
-                <p class="muted" style="margin:4px 0 8px">Rows are lettered A, B, C… Optionally mark VIP / Premium row ranges; the rest are Regular.</p>
-                <div class="row">
-                    <div class="field"><label>VIP rows from</label><input type="number" th:field="*{vipFromRow}" min="1"/></div>
-                    <div class="field"><label>VIP rows to</label><input type="number" th:field="*{vipToRow}" min="1"/></div>
-                </div>
-                <div class="row">
-                    <div class="field"><label>Premium rows from</label><input type="number" th:field="*{premiumFromRow}" min="1"/></div>
-                    <div class="field"><label>Premium rows to</label><input type="number" th:field="*{premiumToRow}" min="1"/></div>
-                </div>
+                <p class="muted" style="margin:4px 0 8px">Rows are lettered automatically. Seats start in one section and can be regrouped in the hall editor.</p>
 
                 <div id="builderWrap" style="margin-top:6px">
                     <div class="layout-toolbar">
@@ -49,10 +41,8 @@
                             <label style="font-weight:600;font-size:.88rem">Seat layout builder</label>
                             <p class="muted" id="previewNote" style="margin:2px 0 0">Set rows and columns to generate seats, then arrange them.</p>
                         </div>
-                        <div class="layout-legend" aria-label="Seat type legend">
-                            <span><i class="seat-dot VIP"></i>VIP</span>
-                            <span><i class="seat-dot PREMIUM"></i>Premium</span>
-                            <span><i class="seat-dot REGULAR"></i>Regular</span>
+                        <div class="layout-legend" aria-label="Layout legend">
+                            <span><i class="seat-dot SEAT"></i>Seat</span>
                         </div>
                     </div>
 
@@ -62,14 +52,6 @@
                         <div>
                             <label>Selection</label>
                             <div class="sel-label" id="selLabel">—</div>
-                        </div>
-                        <div>
-                            <label>Seat type</label>
-                            <div class="type-seg" id="typeSeg">
-                                <button type="button" data-type="VIP">VIP</button>
-                                <button type="button" data-type="PREMIUM">Premium</button>
-                                <button type="button" data-type="REGULAR">Regular</button>
-                            </div>
                         </div>
                         <div>
                             <label for="inSection">Section name</label>
@@ -107,6 +89,6 @@
         </form>
     </div>
 </main>
-<script th:src="@{/js/hall-builder.js}"></script>
+<script th:src="@{/js/hall-builder.js(v=2)}"></script>
 </body>
 </html>

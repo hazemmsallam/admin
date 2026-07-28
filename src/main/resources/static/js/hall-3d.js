@@ -24,11 +24,7 @@ import { RoundedBoxGeometry } from "/vendor/three/RoundedBoxGeometry.js";
     var PIXELS_PER_METER = 52;
     var SNAP_PIXELS = 4;
     var MAX_LABELS = 250;
-    var TYPE_COLORS = {
-        VIP: new THREE.Color(0x9a5cf5),
-        PREMIUM: new THREE.Color(0x2e75dc),
-        REGULAR: new THREE.Color(0x68758a)
-    };
+    var DEFAULT_SEAT_COLOR = 0x5f6b7a;
 
     var state = editor.getState();
     var worldWidth = state.width / PIXELS_PER_METER;
@@ -116,9 +112,9 @@ import { RoundedBoxGeometry } from "/vendor/three/RoundedBoxGeometry.js";
     var hitPoint = new THREE.Vector3();
     var drag = null;
 
-    // Non-bookable tables live in their own group, one THREE.Group per table (they are few).
+    // Non-bookable layout objects live in their own groups.
     var tableRoot = new THREE.Group();
-    tableRoot.name = "tables";
+    tableRoot.name = "layoutObjects";
     scene.add(tableRoot);
     var tableEntries = [];
     var tableByKey = new Map();
@@ -127,6 +123,8 @@ import { RoundedBoxGeometry } from "/vendor/three/RoundedBoxGeometry.js";
     var TABLE_TOP_COLOR = 0x8a5a33;
     var TABLE_LEG_COLOR = 0x4a3421;
     var TABLE_SEL_COLOR = 0xffc857;
+    var SCREEN_FRAME_COLOR = 0x111827;
+    var SCREEN_FACE_COLOR = 0x0e7490;
 
     // Section boundaries drawn as coloured floor outlines.
     var sectionRoot = new THREE.Group();
@@ -395,14 +393,14 @@ import { RoundedBoxGeometry } from "/vendor/three/RoundedBoxGeometry.js";
             var yaw = -THREE.MathUtils.degToRad(seat.rot || 0);
             var seatWidth = Math.max(0.42, seat.w / PIXELS_PER_METER * 0.94);
             var seatDepth = Math.max(0.38, seat.h / PIXELS_PER_METER * 0.74);
-            var typeColor = TYPE_COLORS[seat.type] || TYPE_COLORS.REGULAR;
+            var sectionColor = seatSectionColor(seat, nextState.sections);
 
             dummy.position.set(position.x, 0.43, position.z);
             dummy.rotation.set(0, yaw, 0);
             dummy.scale.set(seatWidth, 0.3, seatDepth);
             dummy.updateMatrix();
             seatMesh.setMatrixAt(index, dummy.matrix);
-            seatMesh.setColorAt(index, typeColor);
+            seatMesh.setColorAt(index, sectionColor);
 
             var backOffset = new THREE.Vector3(0, 0, seatDepth * 0.42).applyAxisAngle(yAxis, yaw);
             dummy.position.set(position.x + backOffset.x, 0.83, position.z + backOffset.z);
@@ -410,7 +408,7 @@ import { RoundedBoxGeometry } from "/vendor/three/RoundedBoxGeometry.js";
             dummy.scale.set(seatWidth, 0.62, Math.max(0.12, seatDepth * 0.2));
             dummy.updateMatrix();
             backMesh.setMatrixAt(index, dummy.matrix);
-            backMesh.setColorAt(index, typeColor);
+            backMesh.setColorAt(index, sectionColor);
 
             dummy.position.set(position.x, 0.18, position.z);
             dummy.rotation.set(0, yaw, 0);
@@ -787,7 +785,8 @@ import { RoundedBoxGeometry } from "/vendor/three/RoundedBoxGeometry.js";
     // --- Tables (non-bookable) ----------------------------------------------
     function tableSig(tables) {
         return (tables || []).map(function (t) {
-            return t.key + ":" + t.shape + ":" + t.w + ":" + t.d + ":" + t.height;
+            return t.key + ":" + (t.objectType || "TABLE") + ":" + t.shape + ":" +
+                t.w + ":" + t.d + ":" + t.z + ":" + t.height;
         }).join("|");
     }
 
@@ -814,6 +813,7 @@ import { RoundedBoxGeometry } from "/vendor/three/RoundedBoxGeometry.js";
     }
 
     function buildTableGroup(t) {
+        if (t.objectType === "SCREEN") { return buildScreenGroup(t); }
         var group = new THREE.Group();
         var hWorld = Math.max(0.12, t.height / PIXELS_PER_METER);
         var wWorld = Math.max(0.3, t.w / PIXELS_PER_METER);
@@ -869,6 +869,121 @@ import { RoundedBoxGeometry } from "/vendor/three/RoundedBoxGeometry.js";
         return group;
     }
 
+    function seatSectionColor(seat, sections) {
+        var centerX = seat.x + seat.w / 2;
+        var centerY = seat.y + seat.h / 2;
+        var match = null;
+        var matchArea = Infinity;
+
+        (sections || []).forEach(function (section) {
+            if (section.mode !== "SEATED" || !pointInPolygon(section.points, centerX, centerY)) {
+                return;
+            }
+            var area = polygonArea(section.points);
+            if (area < matchArea) {
+                match = section;
+                matchArea = area;
+            }
+        });
+
+        if (!match && seat.section) {
+            match = (sections || []).find(function (section) {
+                return section.name === seat.section;
+            }) || null;
+        }
+        return new THREE.Color(match ? parseSectionColor(match.color) : DEFAULT_SEAT_COLOR);
+    }
+
+    function pointInPolygon(points, x, y) {
+        if (!points || points.length < 3) { return false; }
+        var inside = false;
+        for (var i = 0, j = points.length - 1; i < points.length; j = i++) {
+            var a = points[i], b = points[j];
+            var crosses = ((a.y > y) !== (b.y > y))
+                && x < (b.x - a.x) * (y - a.y) / ((b.y - a.y) || 1e-9) + a.x;
+            if (crosses) { inside = !inside; }
+        }
+        return inside;
+    }
+
+    function polygonArea(points) {
+        var area = 0;
+        for (var i = 0, j = points.length - 1; i < points.length; j = i++) {
+            area += points[j].x * points[i].y - points[i].x * points[j].y;
+        }
+        return Math.abs(area / 2);
+    }
+
+    function buildScreenGroup(t) {
+        var group = new THREE.Group();
+        var wWorld = Math.max(0.5, t.w / PIXELS_PER_METER);
+        var dWorld = Math.max(0.08, t.d / PIXELS_PER_METER);
+        var hWorld = Math.max(0.3, t.height / PIXELS_PER_METER);
+        var elevationWorld = Math.max(0, (t.z || 0) / PIXELS_PER_METER);
+        var frameMaterial = new THREE.MeshStandardMaterial({
+            color: SCREEN_FRAME_COLOR, roughness: 0.38, metalness: 0.52
+        });
+        var faceMaterial = new THREE.MeshStandardMaterial({
+            color: SCREEN_FACE_COLOR,
+            emissive: 0x073b4c,
+            emissiveIntensity: 0.7,
+            roughness: 0.28,
+            metalness: 0.18
+        });
+
+        var frame = new THREE.Mesh(
+            new RoundedBoxGeometry(wWorld, hWorld, dWorld, 3, Math.min(0.08, dWorld * 0.35)),
+            frameMaterial
+        );
+        frame.position.y = hWorld / 2;
+        frame.castShadow = true;
+        frame.receiveShadow = true;
+        group.add(frame);
+
+        var faceDepth = Math.max(0.018, dWorld * 0.08);
+        var face = new THREE.Mesh(
+            new RoundedBoxGeometry(
+                Math.max(0.2, wWorld * 0.92),
+                Math.max(0.2, hWorld * 0.84),
+                faceDepth,
+                2,
+                Math.min(0.04, faceDepth)
+            ),
+            faceMaterial
+        );
+        face.position.set(0, hWorld / 2, dWorld / 2 + faceDepth / 2);
+        group.add(face);
+
+        if (elevationWorld > 0.05) {
+            var supportMaterial = new THREE.MeshStandardMaterial({
+                color: 0x374151, roughness: 0.46, metalness: 0.55
+            });
+            var supportRadius = Math.max(0.035, Math.min(0.07, wWorld * 0.018));
+            var supportGeometry = new THREE.CylinderGeometry(
+                supportRadius, supportRadius * 1.12, elevationWorld, 14);
+            [-0.28, 0.28].forEach(function (ratio) {
+                var support = new THREE.Mesh(supportGeometry, supportMaterial);
+                support.position.set(wWorld * ratio, -elevationWorld / 2, 0);
+                support.castShadow = true;
+                group.add(support);
+            });
+        }
+
+        var ringOuter = Math.max(wWorld, dWorld) * 0.72;
+        var ringGeometry = new THREE.RingGeometry(ringOuter * 0.86, ringOuter, 40);
+        ringGeometry.rotateX(-Math.PI / 2);
+        var ring = new THREE.Mesh(ringGeometry, new THREE.MeshBasicMaterial({
+            color: TABLE_SEL_COLOR, transparent: true, opacity: 0.95,
+            side: THREE.DoubleSide, depthWrite: false
+        }));
+        ring.visible = false;
+        ring.renderOrder = 4;
+        ring.userData.isRing = true;
+        group.userData.ring = ring;
+        group.add(ring);
+        return group;
+    }
+
     function updateTableTransforms(nextState) {
         (nextState.tables || []).forEach(function (t) {
             var group = tableByKey.get(t.key);
@@ -878,7 +993,10 @@ import { RoundedBoxGeometry } from "/vendor/three/RoundedBoxGeometry.js";
             var yBase = (t.z || 0) / PIXELS_PER_METER;
             group.position.set(cx, yBase, cz);
             group.rotation.set(0, -THREE.MathUtils.degToRad(t.rot || 0), 0);
-            if (group.userData.ring) { group.userData.ring.visible = Boolean(t.selected); }
+            if (group.userData.ring) {
+                group.userData.ring.position.y = -yBase + 0.02;
+                group.userData.ring.visible = Boolean(t.selected);
+            }
         });
     }
 
@@ -1004,7 +1122,13 @@ import { RoundedBoxGeometry } from "/vendor/three/RoundedBoxGeometry.js";
         } else if (selectedSeats.length > 1) {
             selectionStatus.textContent = selectedSeats.length + " seats selected";
         } else {
-            selectionStatus.textContent = state.editing ? "Edit enabled" : "View only";
+            var selectedObject = (state.tables || []).find(function (item) { return item.selected; });
+            if (selectedObject) {
+                var noun = selectedObject.objectType === "SCREEN" ? "Screen" : "Table";
+                selectionStatus.textContent = selectedObject.label || noun;
+            } else {
+                selectionStatus.textContent = state.editing ? "Edit enabled" : "View only";
+            }
         }
     }
 

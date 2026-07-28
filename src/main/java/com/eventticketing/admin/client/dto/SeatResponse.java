@@ -6,7 +6,6 @@ public record SeatResponse(
         String rowLabel,
         Integer rowIndex,
         Integer seatNumber,
-        String seatType,
         Integer layoutX,
         Integer layoutY,
         Integer rotationDegrees,

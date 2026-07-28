@@ -39,17 +39,16 @@
             </select>
             <button type="submit" class="btn">Apply</button>
         </form>
-        <p class="muted" style="margin-bottom:0">Publishing requires complete pricing for every seat type (or a general-admission price).</p>
+        <p class="muted" style="margin-bottom:0">Publishing requires a price for every hall section.</p>
     </div>
 
     <div class="card mt">
         <h2 style="margin-top:0;font-size:1.05rem">Pricing</h2>
         <table th:if="${event.pricing() != null and !#lists.isEmpty(event.pricing())}">
-            <thead><tr><th>Seat type</th><th>Price</th></tr></thead>
+            <thead><tr><th>Section</th><th>Price</th></tr></thead>
             <tbody>
             <tr th:each="p : ${event.pricing()}">
-                <td><span class="badge" th:classappend="${p.seatType()} ?: 'REGULAR'"
-                          th:text="${p.seatType()} ?: 'General admission'">type</span></td>
+                <td><span class="badge" th:text="${p.sectionName()}">Section</span></td>
                 <td th:text="${p.price()}">0.00</td>
             </tr>
             </tbody>
