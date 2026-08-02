@@ -799,6 +799,16 @@ form.inline { display: inline; margin: 0; }
 /* Composes with the existing `hidden` toggles: a panel shows only when neither is set. */
 .tab-hidden { display: none !important; }
 
+/* Live side count for the selected section, between the −/+ steppers. */
+.sides-count {
+  min-width: 22px;
+  text-align: center;
+  font-weight: 700;
+  font-size: .82rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
 .preset-picker {
   padding: 5px 8px;
   border: 1px solid var(--line);

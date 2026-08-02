@@ -14,7 +14,7 @@ Built with Spring Boot 3 / Java 21, Thymeleaf, and Spring Security.
 | Area | Actions |
 |------|---------|
 | **Organizers** | list · create · edit · delete |
-| **Halls** | list · create (seated layout with VIP/Premium row ranges, or general admission) · view seats · edit name/address · delete |
+| **Halls** | list · create seated or general-admission layouts · manage seats and sections · edit name/address · delete |
 | **Events** | list · create · edit · set pricing (per seat type or general admission) · change status (Draft/Published/Cancelled/Sold out) · delete |
 
 Everything is performed by calling the event-ticketing API; the admin app adds the login layer

@@ -59,7 +59,13 @@
     var btnRect = document.getElementById("btnSectionRect");
     var btnCircle = document.getElementById("btnSectionCircle");
     var btnTriangle = document.getElementById("btnSectionTriangle");
+    var btnPentagon = document.getElementById("btnSectionPentagon");
+    var btnHexagon = document.getElementById("btnSectionHexagon");
     var btnCurve = document.getElementById("btnSectionCurve");
+    var btnSidesUp = document.getElementById("btnSidesUp");
+    var btnSidesDown = document.getElementById("btnSidesDown");
+    var sidesCount = document.getElementById("sidesCount");
+    var btnStar = document.getElementById("btnSectionStar");
     var btnDraw = document.getElementById("btnSectionDraw");
     var btnFinish = document.getElementById("btnSectionFinish");
     var btnCopy = document.getElementById("btnCopySelection");
@@ -105,6 +111,9 @@
     // Points for a shape preset inscribed in the box (x,y,w,h), mirroring the backend ShapePoints
     // generator so a circle/triangle/curve section is stored as an ordinary editable polygon.
     var CIRCLE_SEGMENTS = 48, CURVE_SEGMENTS = 32;
+    // Straight-sided editing limits: below 3 it stops being a polygon, and past ~16 sides the
+    // per-edge handles become an unusable ring of confetti (a circle carries 48 points).
+    var MIN_SIDES = 3, MAX_SIDES = 12, EDGE_HANDLE_LIMIT = 16;
     function shapePoints(kind, x, y, w, h) {
         var cx = x + w / 2, cy = y + h / 2, pts = [], i, ang;
         if (kind === "TRIANGLE") {
@@ -130,17 +139,111 @@
             }
             return round(pts);
         }
+        if (kind === "PENTAGON") { return regularPolygon(cx, cy, w / 2, h / 2, 5); }
+        if (kind === "HEXAGON") { return regularPolygon(cx, cy, w / 2, h / 2, 6); }
         // RECTANGLE / default
         return [[x, y], [x + w, y], [x + w, y + h], [x, y + h]];
     }
     function round(pts) { return pts.map(function (p) { return [Math.round(p[0]), Math.round(p[1])]; }); }
+
+    /**
+     * A regular n-gon inscribed in the box, first vertex pointing straight up so a pentagon or
+     * hexagon reads the way people draw one. Mirrors ShapePoints.regularPolygon on the server.
+     */
+    function regularPolygon(cx, cy, rx, ry, sides) {
+        if (sides < 3) { return []; }
+        var pts = [];
+        for (var i = 0; i < sides; i++) {
+            var ang = -Math.PI / 2 + 2 * Math.PI * i / sides;
+            pts.push([cx + rx * Math.cos(ang), cy + ry * Math.sin(ang)]);
+        }
+        return round(pts);
+    }
+
+    // --- Edge operations ------------------------------------------------------
+    // Edge i runs from point i to point i+1 (wrapping). Both operations keep the boundary a
+    // single closed ring, so nothing downstream changes: containment is ray-cast, which handles
+    // concave rings, and the mobile client replays the same points.
+
+    /**
+     * Removes edge i by collapsing its two endpoints into their midpoint — a regular hexagon
+     * becomes a symmetric pentagon. Refuses below 4 points, since a triangle has no edge to
+     * spare without ceasing to be a polygon.
+     */
+    function removeEdge(s, i) {
+        var n = s.points.length;
+        if (n < 4) {
+            setStatus("A shape needs at least three sides.");
+            return false;
+        }
+        var a = s.points[i], b = s.points[(i + 1) % n];
+        var mid = [Math.round((a[0] + b[0]) / 2), Math.round((a[1] + b[1]) / 2)];
+        var next = [];
+        for (var k = 0; k < n; k++) {
+            if (k === i) { next.push(mid); }          // the merged point replaces both ends
+            else if (k !== (i + 1) % n) { next.push(s.points[k]); }
+        }
+        s.points = next;
+        return true;
+    }
+
+    /**
+     * Folds edge i inward: inserts a vertex pulled toward the shape's centre, turning that side
+     * into a V-notch. Applied to every edge of an n-gon this yields an n-pointed star — the
+     * "spider web" shape — and each new vertex stays draggable afterwards.
+     */
+    function invertEdge(s, i, depth) {
+        var n = s.points.length;
+        var c = centroid(s.points);
+        var a = s.points[i], b = s.points[(i + 1) % n];
+        var mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+        var f = depth == null ? 0.55 : depth;         // 0 = at the centre, 1 = unchanged
+        var inner = [
+            Math.round(c[0] + (mid[0] - c[0]) * f),
+            Math.round(c[1] + (mid[1] - c[1]) * f)
+        ];
+        s.points.splice(i + 1, 0, inner);
+        return true;
+    }
+
+    /** Folds every edge inward at once — the one-click star / spider web. */
+    function invertAllEdges(s) {
+        var c = centroid(s.points);
+        var n = s.points.length;
+        var next = [];
+        for (var i = 0; i < n; i++) {
+            var a = s.points[i], b = s.points[(i + 1) % n];
+            var mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+            next.push(a);
+            next.push([
+                Math.round(c[0] + (mid[0] - c[0]) * 0.55),
+                Math.round(c[1] + (mid[1] - c[1]) * 0.55)
+            ]);
+        }
+        s.points = next;
+    }
+
+    /**
+     * Rebuilds the selected section as a regular n-gon filling its current bounding box, so the
+     * sides stepper walks pentagon → hexagon → heptagon without moving or resizing the section.
+     */
+    function setSides(s, sides) {
+        var b = bbox(s.points);
+        var cx = (b.minX + b.maxX) / 2, cy = (b.minY + b.maxY) / 2;
+        var rx = Math.max(12, (b.maxX - b.minX) / 2), ry = Math.max(12, (b.maxY - b.minY) / 2);
+        s.points = regularPolygon(cx, cy, rx, ry, sides);
+        s.shapeKind = sides === 5 ? "PENTAGON" : sides === 6 ? "HEXAGON" : "POLYGON";
+    }
 
     // Adds a preset-shaped section centred on the canvas.
     function addPreset(kind) {
         var w = parseInt(canvas.dataset.w, 10) || 900;
         var h = parseInt(canvas.dataset.h, 10) || 600;
         var bw = Math.min(240, w * 0.3), bh = Math.min(160, h * 0.3);
-        if (kind === "CIRCLE") { bh = bw = Math.min(bw, bh); }
+        // Regular shapes need a square box, or the n-gon comes out stretched into an ellipse.
+        if (kind === "CIRCLE" || kind === "PENTAGON" || kind === "HEXAGON") {
+            bh = bw = Math.min(bw, bh);
+        }
         var x = Math.round(w / 2 - bw / 2), y = Math.round(h / 2 - bh / 2);
         addSection(shapePoints(kind, x, y, bw, bh), null, kind);
     }
@@ -247,7 +350,70 @@
     if (btnRect) { btnRect.addEventListener("click", function () { addPreset("RECTANGLE"); }); }
     if (btnCircle) { btnCircle.addEventListener("click", function () { addPreset("CIRCLE"); }); }
     if (btnTriangle) { btnTriangle.addEventListener("click", function () { addPreset("TRIANGLE"); }); }
+    if (btnPentagon) { btnPentagon.addEventListener("click", function () { addPreset("PENTAGON"); }); }
+    if (btnHexagon) { btnHexagon.addEventListener("click", function () { addPreset("HEXAGON"); }); }
     if (btnCurve) { btnCurve.addEventListener("click", function () { addPreset("CURVE"); }); }
+
+    // --- Sides stepper & star -------------------------------------------------
+    // The stepper regenerates a regular n-gon in the section's existing box, which is the only
+    // way to go hexagon -> pentagon and stay *regular*: removing an edge leaves the surviving
+    // vertices on their original angles, so the result is a valid but irregular pentagon.
+    function stepSides(delta) {
+        var s = singleSelection();
+        if (!s) { return; }
+        var n = s.points.length;
+        if (n > MAX_SIDES) {
+            setStatus("That shape has too many points to step — use a preset first.");
+            return;
+        }
+        var target = Math.min(MAX_SIDES, Math.max(MIN_SIDES, n + delta));
+        if (target === n) { return; }
+        setSides(s, target);
+        renderAll();
+        refreshShapeTools();
+        markDirty();
+        setStatus("Now a regular " + target + "-sided shape.");
+    }
+
+    /** The one selected section, or null when the tools don't apply. */
+    function singleSelection() {
+        if (selection.length !== 1) {
+            setStatus("Select a single section first.");
+            return null;
+        }
+        return selection[0];
+    }
+
+    /** Keeps the sides readout and button states honest about what's selected. */
+    function refreshShapeTools() {
+        if (!sidesCount) { return; }
+        var s = selection.length === 1 ? selection[0] : null;
+        var n = s ? s.points.length : 0;
+        sidesCount.textContent = s ? String(n) : "—";
+        var steppable = !!s && n <= MAX_SIDES;
+        if (btnSidesUp) { btnSidesUp.disabled = !steppable || n >= MAX_SIDES; }
+        if (btnSidesDown) { btnSidesDown.disabled = !steppable || n <= MIN_SIDES; }
+        if (btnStar) { btnStar.disabled = !s || n > EDGE_HANDLE_LIMIT; }
+    }
+
+    if (btnSidesUp) { btnSidesUp.addEventListener("click", function () { stepSides(1); }); }
+    if (btnSidesDown) { btnSidesDown.addEventListener("click", function () { stepSides(-1); }); }
+    if (btnStar) {
+        btnStar.addEventListener("click", function () {
+            var s = singleSelection();
+            if (!s) { return; }
+            if (s.points.length > EDGE_HANDLE_LIMIT) {
+                setStatus("Too many sides to fold — try a pentagon or hexagon.");
+                return;
+            }
+            invertAllEdges(s);
+            s.shapeKind = "POLYGON";
+            renderAll();
+            refreshShapeTools();
+            markDirty();
+            setStatus("Folded every side inward — " + (s.points.length / 2) + "-pointed star.");
+        });
+    }
 
     // --- Free-draw ------------------------------------------------------------
     if (btnDraw) {
@@ -371,6 +537,7 @@
         refreshInspector();
         renderOutliner();
         refreshCommandState();
+        refreshShapeTools();
         notify();
     }
 
@@ -1217,6 +1384,45 @@
                 frame.setAttribute("opacity", 0.6);
                 frame.style.pointerEvents = "none";
                 svg.appendChild(frame);
+
+                // Edge handles sit at each side's midpoint. Only drawn for shapes with few
+                // enough sides to aim at — a 48-segment circle would be a ring of confetti.
+                if (s.points.length <= EDGE_HANDLE_LIMIT) {
+                    s.points.forEach(function (p, idx) {
+                        var q = s.points[(idx + 1) % s.points.length];
+                        var mx = (p[0] + q[0]) / 2, my = (p[1] + q[1]) / 2;
+                        var edge = document.createElementNS(SVG_NS, "rect");
+                        // A diamond, so it never reads as another draggable vertex.
+                        edge.setAttribute("x", mx - 4.5); edge.setAttribute("y", my - 4.5);
+                        edge.setAttribute("width", 9); edge.setAttribute("height", 9);
+                        edge.setAttribute("transform", "rotate(45 " + mx + " " + my + ")");
+                        edge.setAttribute("fill", "#ffffff");
+                        edge.setAttribute("stroke", s.color);
+                        edge.setAttribute("stroke-width", 1.5);
+                        edge.style.pointerEvents = "all";
+                        edge.style.cursor = "pointer";
+                        var label = document.createElementNS(SVG_NS, "title");
+                        label.textContent = "Click: remove this side · Alt+click: fold it inward";
+                        edge.appendChild(label);
+                        edge.addEventListener("pointerdown", function (e) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            if (e.altKey) {
+                                invertEdge(s, idx);
+                                setStatus("Folded a side inward. Alt+click more, or use Star for all at once.");
+                            } else if (!removeEdge(s, idx)) {
+                                return;
+                            } else {
+                                setStatus("Removed a side — the shape now has " + s.points.length + ".");
+                            }
+                            // The boundary changed, so seat membership may have too.
+                            s.shapeKind = "POLYGON";
+                            renderAll();
+                            markDirty();
+                        });
+                        svg.appendChild(edge);
+                    });
+                }
 
                 s.points.forEach(function (p, idx) {
                     var dot = document.createElementNS(SVG_NS, "circle");
