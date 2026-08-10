@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CSAT Survey Runner</title>
+  <link rel="stylesheet" href="./styles.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>📶</text></svg>">
+</head>
+<body>
+
+<header class="topbar">
+  <span class="brand">CSAT Survey Runner</span>
+  <span class="spacer"></span>
+  <span class="user" id="relay-badge">checking relay…</span>
+</header>
+
+<main class="container">
+
+  <!-- ---------------------------------------------------------- 1 -->
+  <section class="card">
+    <div class="card-head">
+      <h2><span class="step">1</span> MSISDN list</h2>
+      <button type="button" class="btn btn-ghost" id="btn-sample">Paste instead</button>
+    </div>
+
+    <div class="dropzone" id="dropzone" tabindex="0" role="button"
+         aria-label="Choose or drop a spreadsheet of MSISDNs">
+      <input type="file" id="file-input" accept=".xlsx,.xlsm,.csv,.tsv,.txt" hidden>
+      <div class="dropzone-icon">⬆</div>
+      <p class="dropzone-title">Drop an Excel file here, or click to choose</p>
+      <p class="dropzone-hint">.xlsx · .xlsm · .csv · .tsv · .txt — read in the browser, nothing is uploaded</p>
+    </div>
+
+    <div class="paste-area hidden" id="paste-area">
+      <label class="field">
+        <span>One MSISDN per line</span>
+        <textarea id="paste-input" rows="6" spellcheck="false"
+                  placeholder="962791234567&#10;962791234568"></textarea>
+      </label>
+      <button type="button" class="btn btn-secondary" id="btn-use-paste">Use this list</button>
+    </div>
+
+    <div class="source-detail hidden" id="source-detail">
+      <div class="chips">
+        <span class="chip" id="chip-file">—</span>
+        <label class="chip chip-select hidden" id="chip-sheet-wrap">
+          Sheet <select id="select-sheet"></select>
+        </label>
+        <label class="chip chip-select">
+          Column <select id="select-column"></select>
+        </label>
+        <label class="chip chip-check">
+          <input type="checkbox" id="chk-dedupe" checked> Remove duplicates
+        </label>
+      </div>
+
+      <div class="summary-row" id="summary-row"></div>
+
+      <details class="preview" id="preview-wrap">
+        <summary>Preview list</summary>
+        <ol class="preview-list" id="preview-list"></ol>
+      </details>
+    </div>
+  </section>
+
+  <!-- ---------------------------------------------------------- 2 -->
+  <section class="card">
+    <div class="card-head">
+      <h2><span class="step">2</span> Request settings</h2>
+      <button type="button" class="btn btn-ghost" id="btn-reset">Reset to defaults</button>
+    </div>
+
+    <label class="field">
+      <span>Endpoint URL</span>
+      <input type="url" id="cfg-base-url" spellcheck="false">
+    </label>
+
+    <div class="grid-4">
+      <label class="field"><span>Survey ID</span><input type="number" id="cfg-survey"></label>
+      <label class="field"><span>Channel ID</span><input type="number" id="cfg-channel"></label>
+      <label class="field">
+        <span>Method</span>
+        <select id="cfg-method">
+          <option value="POST|query">POST — query string</option>
+          <option value="POST|json">POST — JSON body</option>
+          <option value="GET|query">GET — query string</option>
+        </select>
+      </label>
+      <label class="field"><span>Timeout (ms)</span><input type="number" id="cfg-timeout" min="0" step="500"></label>
+    </div>
+
+    <div class="grid-4">
+      <label class="field"><span>Delay between requests (ms)</span><input type="number" id="cfg-delay" min="0" step="100"></label>
+      <label class="field"><span>MSISDNs in parallel</span><input type="number" id="cfg-concurrency" min="1" max="20"></label>
+      <label class="field">
+        <span>Send through</span>
+        <select id="cfg-mode">
+          <option value="relay">Local relay (avoids CORS)</option>
+          <option value="direct">Browser directly</option>
+        </select>
+      </label>
+    </div>
+
+    <h3 class="subhead">Questions</h3>
+    <table class="questions">
+      <thead>
+        <tr><th>question_id</th><th>answer_id</th><th>answer</th><th aria-label="Actions"></th></tr>
+      </thead>
+      <tbody id="questions-body"></tbody>
+    </table>
+    <button type="button" class="btn btn-secondary" id="btn-add-question">Add question</button>
+  </section>
+
+  <!-- ---------------------------------------------------------- 3 -->
+  <section class="card">
+    <div class="card-head">
+      <h2><span class="step">3</span> Run</h2>
+      <span class="muted" id="plan-note">Load a list to begin.</span>
+    </div>
+
+    <div class="run-controls">
+      <button type="button" class="btn btn-primary btn-lg" id="btn-start" disabled>Start processing</button>
+      <button type="button" class="btn btn-danger btn-lg hidden" id="btn-stop">Stop</button>
+      <button type="button" class="btn btn-ghost" id="btn-clear" disabled>Clear results</button>
+    </div>
+
+    <div class="progress hidden" id="progress-wrap">
+      <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+      <span class="progress-label" id="progress-label"></span>
+    </div>
+
+    <div class="stat-grid hidden" id="stat-grid">
+      <div class="stat"><div class="num" id="stat-total">0</div><div class="label">Requests</div></div>
+      <div class="stat"><div class="num ok" id="stat-ok">0</div><div class="label">Succeeded</div></div>
+      <div class="stat"><div class="num bad" id="stat-failed">0</div><div class="label">Failed</div></div>
+      <div class="stat"><div class="num" id="stat-elapsed">0.0s</div><div class="label">Elapsed</div></div>
+    </div>
+
+    <div class="alert hidden" id="run-alert"></div>
+  </section>
+
+  <!-- ------------------------------------------------------ results -->
+  <section class="card hidden" id="results-card">
+    <div class="card-head">
+      <h2>Responses</h2>
+      <div class="tabs">
+        <button type="button" class="tab is-active" data-view="table">Table</button>
+        <button type="button" class="tab" data-view="log">Log</button>
+      </div>
+    </div>
+
+    <div class="toolbar">
+      <label class="chip chip-check"><input type="checkbox" id="chk-failed-only"> Failures only</label>
+      <span class="spacer"></span>
+      <button type="button" class="btn btn-secondary" id="btn-copy">Copy log</button>
+      <button type="button" class="btn btn-secondary" id="btn-csv">Download CSV</button>
+      <button type="button" class="btn btn-secondary" id="btn-json">Download JSON</button>
+    </div>
+
+    <div class="table-scroll" id="view-table">
+      <table class="results">
+        <thead>
+          <tr><th>MSISDN</th><th>Q</th><th>A</th><th>Status</th><th>Time</th><th>Response</th></tr>
+        </thead>
+        <tbody id="results-body"></tbody>
+      </table>
+    </div>
+
+    <pre class="log hidden" id="view-log"></pre>
+  </section>
+
+</main>
+
+<script type="module" src="./app.js"></script>
+</body>
+</html>

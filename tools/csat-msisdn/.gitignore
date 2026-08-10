@@ -1,0 +1,7 @@
+node_modules/
+
+# Local MSISDN lists and exported responses
+*.xlsx
+*.xlsm
+csat-results-*.csv
+csat-results-*.json
