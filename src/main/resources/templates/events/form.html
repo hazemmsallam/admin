@@ -20,19 +20,62 @@
                 <div class="err" th:if="${#fields.hasErrors('name')}" th:errors="*{name}">error</div>
             </div>
             <div class="field">
+                <label for="tagline">Tagline</label>
+                <input type="text" id="tagline" th:field="*{tagline}" maxlength="200"
+                       placeholder="Short line above the title, e.g. BETWEEN TWO SEAS"/>
+                <div class="hint">Shown above the event name on the detail page.</div>
+                <div class="err" th:if="${#fields.hasErrors('tagline')}" th:errors="*{tagline}">error</div>
+            </div>
+            <div class="field">
                 <label for="description">Description</label>
-                <textarea id="description" rows="3" th:field="*{description}"></textarea>
+                <textarea id="description" rows="4" th:field="*{description}"></textarea>
+            </div>
+            <div class="field">
+                <label for="posterFile">Poster image</label>
+                <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-start">
+                    <div style="flex:1;min-width:240px">
+                        <input type="file" id="posterFile" accept="image/jpeg,image/png,image/webp,image/gif"
+                               style="width:100%;padding:7px;border:1px dashed var(--line);border-radius:8px;background:#fff"/>
+                        <div id="posterStatus" class="hint" style="margin-top:6px">
+                            Pick an image — preview shows at once, upload runs automatically.
+                        </div>
+                        <input type="url" id="imageUrl" th:field="*{imageUrl}" maxlength="500"
+                               style="margin-top:8px"
+                               placeholder="https://cdn.example.com/posters/sami-yusuf.jpg"/>
+                        <div class="hint">Filled on upload, or paste an external URL.</div>
+                        <div class="err" th:if="${#fields.hasErrors('imageUrl')}" th:errors="*{imageUrl}">error</div>
+                    </div>
+                    <div id="posterPreviewWrap"
+                         th:style="${event.imageUrl != null and !#strings.isEmpty(event.imageUrl)}
+                             ? 'display:block;width:220px;max-width:100%'
+                             : 'display:none;width:220px;max-width:100%'">
+                        <img id="posterPreview"
+                             th:attr="src=${event.imageUrl}"
+                             alt="Poster preview"
+                             style="width:100%;height:auto;border-radius:8px;border:1px solid var(--line);display:block"/>
+                        <div id="posterCaption" class="hint" style="margin-top:4px;text-align:center">Current poster</div>
+                    </div>
+                </div>
             </div>
             <div class="row">
                 <div class="field">
                     <label for="category">Category</label>
-                    <input type="text" id="category" th:field="*{category}"/>
+                    <input type="text" id="category" th:field="*{category}"
+                           placeholder="Concert, Theatre, Sports..."/>
                 </div>
                 <div class="field">
-                    <label for="maxCapacity">Max capacity</label>
-                    <input type="number" id="maxCapacity" th:field="*{maxCapacity}" min="1"/>
-                    <div class="err" th:if="${#fields.hasErrors('maxCapacity')}" th:errors="*{maxCapacity}">error</div>
+                    <label for="tags">Tags</label>
+                    <input type="text" id="tags" th:field="*{tags}"
+                           placeholder="music, outdoor, family"/>
+                    <div class="hint">Comma-separated. Shown as chips to customers.</div>
                 </div>
+            </div>
+            <div class="field">
+                <label style="display:inline-flex;align-items:center;gap:8px;font-weight:600">
+                    <input type="checkbox" th:field="*{featured}" style="width:auto;margin:0"/>
+                    Featured
+                </label>
+                <div class="hint">Pins the event to the top of the list with a Featured badge.</div>
             </div>
             <div class="row">
                 <div class="field">
@@ -69,5 +112,96 @@
         </form>
     </div>
 </main>
+
+<script th:inline="javascript">
+    (function () {
+        const fileInput = document.getElementById('posterFile');
+        const urlInput = document.getElementById('imageUrl');
+        const preview = document.getElementById('posterPreview');
+        const wrap = document.getElementById('posterPreviewWrap');
+        const caption = document.getElementById('posterCaption');
+        const status = document.getElementById('posterStatus');
+        const uploadUrl = /*[[@{/events/upload-image}]]*/ '/events/upload-image';
+        if (!fileInput || !urlInput || !preview || !wrap) return;
+
+        let localPreviewUrl = null;
+
+        function csrfHeaders() {
+            const h = {};
+            const token = document.querySelector('meta[name="_csrf"]');
+            const header = document.querySelector('meta[name="_csrf_header"]');
+            if (token && header && header.content) {
+                h[header.content] = token.content;
+            }
+            return h;
+        }
+
+        function clearLocalPreview() {
+            if (localPreviewUrl) {
+                URL.revokeObjectURL(localPreviewUrl);
+                localPreviewUrl = null;
+            }
+        }
+
+        function showPreview(src, label) {
+            if (src) {
+                preview.src = src;
+                wrap.style.display = 'block';
+                if (caption && label) caption.textContent = label;
+            } else {
+                preview.removeAttribute('src');
+                wrap.style.display = 'none';
+            }
+        }
+
+        async function uploadFile(file) {
+            if (file.size > 10 * 1024 * 1024) {
+                status.textContent = 'Image must be 10 MB or smaller.';
+                return;
+            }
+            status.textContent = 'Uploading ' + file.name + '…';
+            try {
+                const body = new FormData();
+                body.append('file', file);
+                const resp = await fetch(uploadUrl, {
+                    method: 'POST',
+                    headers: csrfHeaders(),
+                    body: body
+                });
+                const json = await resp.json().catch(function () { return {}; });
+                if (!resp.ok || !json.url) {
+                    status.textContent = json.error || 'Upload failed (' + resp.status + ').';
+                    return;
+                }
+                urlInput.value = json.url;
+                clearLocalPreview();
+                showPreview(json.url, 'Uploaded');
+                status.textContent = 'Uploaded. URL saved in the field below.';
+            } catch (err) {
+                status.textContent = 'Upload failed: ' + err.message;
+            }
+        }
+
+        fileInput.addEventListener('change', function () {
+            const file = fileInput.files && fileInput.files[0];
+            if (!file) return;
+            clearLocalPreview();
+            localPreviewUrl = URL.createObjectURL(file);
+            showPreview(localPreviewUrl, 'Uploading…');
+            uploadFile(file);
+        });
+
+        urlInput.addEventListener('input', function () {
+            const v = urlInput.value.trim();
+            if (!v) {
+                clearLocalPreview();
+                showPreview(null);
+                return;
+            }
+            clearLocalPreview();
+            showPreview(v, 'Preview');
+        });
+    })();
+</script>
 </body>
 </html>

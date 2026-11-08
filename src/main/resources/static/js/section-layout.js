@@ -59,6 +59,10 @@
     var btnRect = document.getElementById("btnSectionRect");
     var btnCircle = document.getElementById("btnSectionCircle");
     var btnTriangle = document.getElementById("btnSectionTriangle");
+    var btnTrapezoid = document.getElementById("btnSectionTrapezoid");
+    var btnTrapezoidLeft = document.getElementById("btnSectionTrapezoidLeft");
+    var btnTrapezoidRight = document.getElementById("btnSectionTrapezoidRight");
+    var btnArena = document.getElementById("btnSectionArena");
     var btnPentagon = document.getElementById("btnSectionPentagon");
     var btnHexagon = document.getElementById("btnSectionHexagon");
     var btnCurve = document.getElementById("btnSectionCurve");
@@ -118,6 +122,21 @@
         var cx = x + w / 2, cy = y + h / 2, pts = [], i, ang;
         if (kind === "TRIANGLE") {
             return [[cx, y], [x + w, y + h], [x, y + h]];
+        }
+        if (kind === "TRAPEZOID") {
+            // Isoceles trapezoid — narrow top (stage side), wide bottom (back of hall).
+            var inset = w * 0.2;
+            return [[x + inset, y], [x + w - inset, y], [x + w, y + h], [x, y + h]];
+        }
+        if (kind === "TRAPEZOID_LEFT") {
+            // Arena left-wing — right edge vertical (meets centre block), left side slants outward going down.
+            var topL = w * 0.3;
+            return [[x + topL, y], [x + w, y], [x + w, y + h], [x, y + h]];
+        }
+        if (kind === "TRAPEZOID_RIGHT") {
+            // Arena right-wing — left edge vertical (meets centre block), right side slants outward going down.
+            var topR = w * 0.3;
+            return [[x, y], [x + w - topR, y], [x + w, y + h], [x, y + h]];
         }
         if (kind === "CIRCLE" || kind === "ELLIPSE") {
             var rx = w / 2, ry = h / 2;
@@ -248,6 +267,45 @@
         addSection(shapePoints(kind, x, y, bw, bh), null, kind);
     }
 
+    /**
+     * Drops a three-piece arena bowl in one click: a centre block flanked by two mirrored wings
+     * cut from the same big trapezoid. The three pieces share seams exactly along the big
+     * trapezoid's two slanted spokes, so from the audience the whole bowl reads as one
+     * continuous fan — narrow near the stage, wide at the back.
+     *
+     * Layout: full bowl is 70% of canvas width × 40% of canvas height, with the top edge about
+     * 55% of the bottom edge. The centre takes the middle 40% of the width at every row, so
+     * each wing is 30% of the width at the bottom, splaying inward as it climbs toward the stage.
+     */
+    function addArena() {
+        var w = parseInt(canvas.dataset.w, 10) || 900;
+        var hh = parseInt(canvas.dataset.h, 10) || 600;
+        var arenaW = Math.min(820, w * 0.8);
+        var arenaH = Math.min(300, hh * 0.42);
+        var cx = Math.round(w / 2);
+        var y = Math.round((hh - arenaH) / 2);
+        var yB = y + arenaH;
+        var botHalf = arenaW / 2;
+        var topHalf = botHalf * 0.55;       // top is 55% of bottom width — matches the Figma arena
+        var ctFrac = 0.42;                  // centre takes 42% of the width at every row
+
+        var ctTopL = Math.round(cx - topHalf * ctFrac);
+        var ctTopR = Math.round(cx + topHalf * ctFrac);
+        var ctBotL = Math.round(cx - botHalf * ctFrac);
+        var ctBotR = Math.round(cx + botHalf * ctFrac);
+        var leftTopX = Math.round(cx - topHalf);
+        var leftBotX = Math.round(cx - botHalf);
+        var rightTopX = Math.round(cx + topHalf);
+        var rightBotX = Math.round(cx + botHalf);
+
+        var centre = [[ctTopL, y], [ctTopR, y], [ctBotR, yB], [ctBotL, yB]];
+        var left   = [[leftTopX, y], [ctTopL, y], [ctBotL, yB], [leftBotX, yB]];
+        var right  = [[ctTopR, y], [rightTopX, y], [rightBotX, yB], [ctBotR, yB]];
+        addSection(left,   "Left Wing",  "TRAPEZOID_LEFT");
+        addSection(centre, "Centre",     "TRAPEZOID");
+        addSection(right,  "Right Wing", "TRAPEZOID_RIGHT");
+    }
+
     ensureSectionsFit(sections);
     renderAll();
     notify();
@@ -350,6 +408,10 @@
     if (btnRect) { btnRect.addEventListener("click", function () { addPreset("RECTANGLE"); }); }
     if (btnCircle) { btnCircle.addEventListener("click", function () { addPreset("CIRCLE"); }); }
     if (btnTriangle) { btnTriangle.addEventListener("click", function () { addPreset("TRIANGLE"); }); }
+    if (btnTrapezoid) { btnTrapezoid.addEventListener("click", function () { addPreset("TRAPEZOID"); }); }
+    if (btnTrapezoidLeft) { btnTrapezoidLeft.addEventListener("click", function () { addPreset("TRAPEZOID_LEFT"); }); }
+    if (btnTrapezoidRight) { btnTrapezoidRight.addEventListener("click", function () { addPreset("TRAPEZOID_RIGHT"); }); }
+    if (btnArena) { btnArena.addEventListener("click", function () { addArena(); }); }
     if (btnPentagon) { btnPentagon.addEventListener("click", function () { addPreset("PENTAGON"); }); }
     if (btnHexagon) { btnHexagon.addEventListener("click", function () { addPreset("HEXAGON"); }); }
     if (btnCurve) { btnCurve.addEventListener("click", function () { addPreset("CURVE"); }); }

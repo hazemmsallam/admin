@@ -104,20 +104,26 @@
         primary = null;
         refreshInspector();
 
+        // The whole Seated-layout fieldset is only meaningful for a seated hall.
+        var fieldset = document.getElementById("seatedLayoutFieldset");
         if (!isSeated()) {
+            if (fieldset) { fieldset.style.display = "none"; }
             builderWrap.style.display = "none";
             serialize();
             return;
         }
+        if (fieldset) { fieldset.style.display = "block"; }
         builderWrap.style.display = "block";
 
         var rows = numField("numRows"), cols = numField("numColumns");
         if (!rows || !cols || rows < 1 || cols < 1) {
-            note.textContent = "Enter rows and columns to generate the seats.";
+            // Rows/columns are optional — the hall can be saved empty and the
+            // seats drawn visually in the hall editor afterwards.
+            note.textContent = "No seats yet. Enter rows and columns to preview a grid, or leave empty and arrange seats in the hall editor after creation.";
             hintEl.textContent = "";
-            if (stage) { stage.style.display = "none"; }
+            if (stage) { stage.style.display = "flex"; }
             canvas.style.width = "820px";
-            canvas.style.height = "200px";
+            canvas.style.height = "260px";
             serialize();
             return;
         }

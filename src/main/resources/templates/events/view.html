@@ -18,17 +18,38 @@
     </div>
 
     <div class="card">
-        <p><strong>Status:</strong> <span class="badge" th:classappend="${event.status()}" th:text="${event.status()}">STATUS</span></p>
-        <p><strong>Category:</strong> <span th:text="${event.category()}">cat</span></p>
-        <p><strong>Description:</strong> <span th:text="${event.description()}">desc</span></p>
-        <p><strong>Starts:</strong> <span th:text="${event.startAt()}">start</span></p>
-        <p><strong>Ends:</strong> <span th:text="${event.endAt()}">end</span></p>
-        <p><strong>Max capacity:</strong> <span th:text="${event.maxCapacity()}">0</span></p>
-        <p><strong>Organizer:</strong> <span th:text="${event.organizer() != null ? event.organizer().name() : '—'}">org</span></p>
-        <p><strong>Hall:</strong>
-            <a th:if="${event.hall() != null}" th:href="@{/halls/{id}(id=${event.hall().id()})}"
-               th:text="${event.hall().name()} + (${event.hall().seated()} ? ' (seated)' : ' (GA)')">hall</a>
-        </p>
+        <div style="display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start">
+            <img th:if="${event.imageUrl() != null and !#strings.isEmpty(event.imageUrl())}"
+                 th:src="${event.imageUrl()}" alt="Poster"
+                 style="width:220px;max-width:100%;border-radius:10px;border:1px solid var(--line);object-fit:cover"/>
+            <div style="flex:1;min-width:240px">
+                <p th:if="${event.tagline() != null and !#strings.isEmpty(event.tagline())}"
+                   th:text="${event.tagline()}"
+                   style="margin:0 0 8px;letter-spacing:.14em;font-weight:700;color:var(--muted);text-transform:uppercase">
+                    TAGLINE</p>
+                <p><strong>Status:</strong>
+                    <span class="badge" th:classappend="${event.status()}" th:text="${event.status()}">STATUS</span>
+                    <span th:if="${event.featured() != null and event.featured()}"
+                          class="badge" style="background:#fff2d9;color:#96650a;margin-left:6px">FEATURED</span>
+                </p>
+                <p><strong>Category:</strong> <span th:text="${event.category()}">cat</span></p>
+                <p th:if="${event.tags() != null and !#lists.isEmpty(event.tags())}">
+                    <strong>Tags:</strong>
+                    <span th:each="t : ${event.tags()}" class="badge"
+                          style="background:#eef1f6;color:#55607a;margin-right:4px"
+                          th:text="${t}">tag</span>
+                </p>
+                <p><strong>Description:</strong> <span th:text="${event.description()}">desc</span></p>
+                <p><strong>Starts:</strong> <span th:text="${event.startAt()}">start</span></p>
+                <p><strong>Ends:</strong> <span th:text="${event.endAt()}">end</span></p>
+                <p><strong>Max capacity:</strong> <span th:text="${event.maxCapacity()}">0</span></p>
+                <p><strong>Organizer:</strong> <span th:text="${event.organizer() != null ? event.organizer().name() : '—'}">org</span></p>
+                <p><strong>Hall:</strong>
+                    <a th:if="${event.hall() != null}" th:href="@{/halls/{id}(id=${event.hall().id()})}"
+                       th:text="${event.hall().name()} + (${event.hall().seated()} ? ' (seated)' : ' (GA)')">hall</a>
+                </p>
+            </div>
+        </div>
     </div>
 
     <div class="card mt">

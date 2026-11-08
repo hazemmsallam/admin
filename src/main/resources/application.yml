@@ -6,6 +6,11 @@ spring:
   jackson:
     deserialization:
       fail-on-unknown-properties: false
+  servlet:
+    multipart:
+      # Browser POSTs event posters through /events/upload-image; cap matches the backend.
+      max-file-size: 12MB
+      max-request-size: 15MB
 
 server:
   port: ${SERVER_PORT:8092}

@@ -21,16 +21,23 @@ import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.ResponseBody;
+import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 
+import java.io.IOException;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 @Controller
 @RequestMapping("/events")
@@ -90,11 +97,14 @@ public class EventController {
         form.setName(event.name());
         form.setDescription(event.description());
         form.setCategory(event.category());
+        form.setImageUrl(event.imageUrl());
+        form.setTagline(event.tagline());
+        form.setFeatured(Boolean.TRUE.equals(event.featured()));
+        form.setTags(joinTags(event.tags()));
         form.setStartAt(toLocal(event.startAt()));
         form.setEndAt(toLocal(event.endAt()));
         form.setOrganizerId(event.organizer() != null ? event.organizer().id() : null);
         form.setHallId(event.hall() != null ? event.hall().id() : null);
-        form.setMaxCapacity(event.maxCapacity());
         model.addAttribute("event", form);
         model.addAttribute("id", id);
         addFormOptions(model);
@@ -169,6 +179,27 @@ public class EventController {
         }
     }
 
+    /**
+     * File picker in the event form posts here. Admin forwards the multipart to the backend's
+     * uploads endpoint and returns the resulting URL so the browser can fill the imageUrl field
+     * and show a preview. CSRF-protected like every other admin POST.
+     */
+    @PostMapping("/upload-image")
+    @ResponseBody
+    public ResponseEntity<Map<String, String>> uploadImage(@RequestParam("file") MultipartFile file) throws IOException {
+        if (file == null || file.isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Choose an image first."));
+        }
+        try {
+            Map<String, String> body = client.uploadImage(file.getBytes(),
+                    file.getOriginalFilename() == null ? "upload" : file.getOriginalFilename(),
+                    file.getContentType());
+            return ResponseEntity.ok(body);
+        } catch (TicketingApiException ex) {
+            return ResponseEntity.status(ex.getStatus()).body(Map.of("error", ex.getMessage()));
+        }
+    }
+
     @PostMapping("/{id}/delete")
     public String delete(@PathVariable Long id, RedirectAttributes ra) {
         try {
@@ -190,8 +221,32 @@ public class EventController {
     private CreateEventRequest toCreateRequest(EventForm form) {
         return new CreateEventRequest(
                 form.getName(), form.getDescription(), form.getCategory(),
+                form.getImageUrl(), form.getTagline(), form.isFeatured(),
+                parseTags(form.getTags()),
                 toInstant(form.getStartAt()), toInstant(form.getEndAt()),
-                form.getOrganizerId(), form.getHallId(), form.getMaxCapacity());
+                form.getOrganizerId(), form.getHallId(), null);
+    }
+
+    /** Operator types "music, outdoor, family"; the API takes a set, deduped and trimmed. */
+    static Set<String> parseTags(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return Set.of();
+        }
+        Set<String> tags = new LinkedHashSet<>();
+        for (String part : raw.split(",")) {
+            String tag = part.trim();
+            if (!tag.isEmpty()) {
+                tags.add(tag);
+            }
+        }
+        return tags;
+    }
+
+    private static String joinTags(Set<String> tags) {
+        if (tags == null || tags.isEmpty()) {
+            return "";
+        }
+        return String.join(", ", tags);
     }
 
     private PricingForm toPricingForm(EventResponse event, HallResponse hall) {

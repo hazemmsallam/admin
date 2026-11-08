@@ -17,10 +17,17 @@ import com.eventticketing.admin.client.dto.UpdateHallRequest;
 import com.eventticketing.admin.client.dto.UpdateHallSeatsRequest;
 import com.eventticketing.admin.client.dto.UpdateSeatLayoutRequest;
 import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.core.io.ByteArrayResource;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestClient;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * Thin wrapper over the event-ticketing REST API. Every method delegates to the shared
@@ -147,5 +154,34 @@ public class TicketingClient {
 
     public void deleteLayoutPreset(Long id) {
         rest.delete().uri("/api/layout-presets/{id}", id).retrieve().toBodilessEntity();
+    }
+
+    // ---------------------------------------------------------------- uploads
+
+    /**
+     * Forwards an image upload to the ticketing API and returns its {@code {"url": "..."}} payload.
+     * The admin never touches the file on disk — the backend owns the uploads folder.
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, String> uploadImage(byte[] bytes, String filename, String contentType) {
+        ByteArrayResource resource = new ByteArrayResource(bytes) {
+            @Override
+            public String getFilename() {
+                return filename;
+            }
+        };
+        HttpHeaders partHeaders = new HttpHeaders();
+        if (contentType != null && !contentType.isBlank()) {
+            // The backend's UploadController validates against image/*; pass what the browser said.
+            partHeaders.setContentType(MediaType.parseMediaType(contentType));
+        }
+        MultiValueMap<String, Object> parts = new LinkedMultiValueMap<>();
+        parts.add("file", new HttpEntity<>(resource, partHeaders));
+        return rest.post()
+                .uri("/api/uploads/images")
+                .contentType(MediaType.MULTIPART_FORM_DATA)
+                .body(parts)
+                .retrieve()
+                .body(Map.class);
     }
 }

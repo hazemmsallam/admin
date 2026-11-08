@@ -12,11 +12,28 @@
 
     <table>
         <thead>
-        <tr><th>Name</th><th>Category</th><th>Starts</th><th>Hall</th><th>Status</th><th></th></tr>
+        <tr><th></th><th>Name</th><th>Category</th><th>Starts</th><th>Hall</th><th>Status</th><th></th></tr>
         </thead>
         <tbody>
         <tr th:each="e : ${events}">
-            <td><a th:href="@{/events/{id}(id=${e.id()})}" th:text="${e.name()}">Name</a></td>
+            <td style="width:72px">
+                <img th:if="${e.imageUrl() != null and !#strings.isEmpty(e.imageUrl())}"
+                     th:src="${e.imageUrl()}" alt=""
+                     style="width:56px;height:40px;object-fit:cover;border-radius:6px;border:1px solid var(--line);display:block"/>
+            </td>
+            <td>
+                <a th:href="@{/events/{id}(id=${e.id()})}" th:text="${e.name()}">Name</a>
+                <span th:if="${e.featured() != null and e.featured()}" class="badge"
+                      style="background:#fff2d9;color:#96650a;margin-left:6px">FEATURED</span>
+                <div th:if="${e.tagline() != null and !#strings.isEmpty(e.tagline())}"
+                     class="muted" style="font-size:.78rem;letter-spacing:.08em;text-transform:uppercase"
+                     th:text="${e.tagline()}">tagline</div>
+                <div th:if="${e.tags() != null and !#lists.isEmpty(e.tags())}" style="margin-top:4px">
+                    <span th:each="t : ${e.tags()}" class="badge"
+                          style="background:#eef1f6;color:#55607a;margin-right:3px;font-size:.68rem"
+                          th:text="${t}">tag</span>
+                </div>
+            </td>
             <td th:text="${e.category()}">cat</td>
             <td th:text="${e.startAt() != null ? #strings.replace(#strings.substring(e.startAt().toString(),0,16),'T',' ') : ''}">start</td>
             <td th:text="${e.hallName()}">hall</td>
@@ -26,7 +43,7 @@
             </td>
         </tr>
         <tr th:if="${#lists.isEmpty(events)}">
-            <td colspan="6" class="muted">No events yet.</td>
+            <td colspan="7" class="muted">No events yet.</td>
         </tr>
         </tbody>
     </table>
