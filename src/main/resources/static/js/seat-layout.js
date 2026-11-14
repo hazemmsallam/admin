@@ -22,6 +22,7 @@
 
     var GAP_X = 58, GAP_Y = 52, DEF_W = 42, DEF_H = 38, START_X = 70, START_Y = 150;
     var LAYOUT_MARGIN = 24, STAGE_CLEAR_BOTTOM = 118, PLACEMENT_CLEARANCE = 6;
+    var MIN_SEAT_SIZE = 4, MAX_SEAT_SIZE = 120;
     var MAX_BULK_SEATS = 500, CANVAS_GROW_STEP = 120;
 
     var W = int(canvas.dataset.w, 900);
@@ -92,10 +93,11 @@
             c: int(el.dataset.col, 1),
             x: int(el.dataset.x, START_X),
             y: int(el.dataset.y, START_Y),
-            w: clamp(int(el.dataset.w, DEF_W), 12, 120),
-            h: clamp(int(el.dataset.h, DEF_H), 12, 120),
+            w: clamp(int(el.dataset.w, DEF_W), MIN_SEAT_SIZE, MAX_SEAT_SIZE),
+            h: clamp(int(el.dataset.h, DEF_H), MIN_SEAT_SIZE, MAX_SEAT_SIZE),
             rot: clamp(int(el.dataset.rot, 0), -180, 180),
-            section: el.dataset.section || ""
+            section: el.dataset.section || "",
+            sectionKey: el.dataset.sectionId ? "section:" + el.dataset.sectionId : ""
         };
         ensureSeatKey(el._st);
         if (!el._st.rowLabel) { el._st.rowLabel = letter(el._st.r); }
@@ -124,15 +126,103 @@
         el.style.width = s.w + "px";
         el.style.height = s.h + "px";
         el.style.transform = "rotate(" + s.rot + "deg)";
-        el.className = "seat-chip" + (isSelected(el) ? " selected" : "");
+        el.classList.toggle("selected", isSelected(el));
         el.textContent = s.label;
         el.title = s.label;
     }
 
     function clampPosition(el) {
         var s = el._st;
-        s.x = Math.max(0, s.x);
-        s.y = Math.max(0, s.y);
+        var b = window.SeatBoundsOverride;
+        if (b) {
+            var x = Math.max(Math.ceil(b.left), Math.min(Math.floor(b.right - s.w), s.x));
+            var y = Math.max(Math.ceil(b.top), Math.min(Math.floor(b.bottom - s.h), s.y));
+            // Pull legacy out-of-bounds seats inward when opening the section.
+            if (!seatFitsSection(s, x, y, b) && b.centroid) {
+                var dx = b.centroid.x - (x + s.w / 2);
+                var dy = b.centroid.y - (y + s.h / 2);
+                var steps = Math.ceil(Math.hypot(dx, dy));
+                for (var i = 1; i <= steps; i++) {
+                    var nextX = Math.round(x + dx * i / steps);
+                    var nextY = Math.round(y + dy * i / steps);
+                    if (seatFitsSection(s, nextX, nextY, b)) {
+                        x = nextX;
+                        y = nextY;
+                        break;
+                    }
+                }
+            }
+            if (seatFitsSection(s, x, y, b)) {
+                s.x = x;
+                s.y = y;
+            }
+        } else {
+            s.x = Math.max(0, s.x);
+            s.y = Math.max(0, s.y);
+        }
+    }
+
+    // Ray-casting point-in-polygon used by clampPosition when a Section Edit view publishes
+    // a polygon on SeatBoundsOverride. Same algorithm as hall-3d.js's pointInPolygon.
+    function pointInPoly(points, x, y) {
+        var inside = false;
+        for (var i = 0, j = points.length - 1; i < points.length; j = i++) {
+            var a = points[i], b = points[j];
+            var crosses = ((a.y > y) !== (b.y > y))
+                && x < (b.x - a.x) * (y - a.y) / ((b.y - a.y) || 1e-9) + a.x;
+            if (crosses) { inside = !inside; }
+        }
+        return inside;
+    }
+
+    function seatFitsSection(seat, x, y, bounds) {
+        var polygon = bounds.polygon;
+        if (x < 0 || y < 0 || !polygon || polygon.length < 3) { return false; }
+
+        var hw = seat.w / 2, hh = seat.h / 2;
+        var cx = x + hw, cy = y + hh;
+        var angle = (seat.rot || 0) * Math.PI / 180;
+        var cos = Math.cos(angle), sin = Math.sin(angle);
+        for (var horizontal = -1; horizontal <= 1; horizontal += 2) {
+            for (var vertical = -1; vertical <= 1; vertical += 2) {
+                var u = horizontal * hw, v = vertical * hh;
+                var px = cx + u * cos - v * sin, py = cy + u * sin + v * cos;
+                if (!pointInPoly(polygon, px, py) && !polygon.some(function (a, i) {
+                    var b = polygon[(i + 1) % polygon.length];
+                    var epsilon = 1e-8;
+                    return px >= Math.min(a.x, b.x) - epsilon && px <= Math.max(a.x, b.x) + epsilon
+                        && py >= Math.min(a.y, b.y) - epsilon && py <= Math.max(a.y, b.y) + epsilon
+                        && Math.abs((px - a.x) * (b.y - a.y) - (py - a.y) * (b.x - a.x)) < epsilon;
+                })) {
+                    return false;
+                }
+            }
+        }
+
+        // Test boundary edges in the seat's local coordinates. A concave boundary
+        // can cut through a seat even when all four corners are inside.
+        function local(point) {
+            var dx = point.x - cx, dy = point.y - cy;
+            return { x: dx * cos + dy * sin, y: -dx * sin + dy * cos };
+        }
+        var a = local(polygon[polygon.length - 1]);
+        for (var i = 0; i < polygon.length; i++) {
+            var b = local(polygon[i]);
+            if (Math.max(a.x, b.x) > -hw && Math.min(a.x, b.x) < hw
+                && Math.max(a.y, b.y) > -hh && Math.min(a.y, b.y) < hh) {
+                var dx = b.x - a.x, dy = b.y - a.y;
+                var tx1 = dx ? (-hw - a.x) / dx : -Infinity;
+                var tx2 = dx ? (hw - a.x) / dx : Infinity;
+                var ty1 = dy ? (-hh - a.y) / dy : -Infinity;
+                var ty2 = dy ? (hh - a.y) / dy : Infinity;
+                if (Math.max(0, Math.min(tx1, tx2), Math.min(ty1, ty2))
+                    < Math.min(1, Math.max(tx1, tx2), Math.max(ty1, ty2))) {
+                    return false;
+                }
+            }
+            a = b;
+        }
+        return true;
     }
 
     // --- Selection -----------------------------------------------------------
@@ -199,12 +289,15 @@
         if (!isSelected(el)) { setSelection([el]); }
         else { primary = el; refreshInspector(); }
 
+        if (!window.SeatBoundsOverride) { return; }
+
         // If this seat belongs to a cross-object group, expand the selection to every grouped seat
         // and capture the group's section/table baseline so they all move together (bidirectional).
         // Alt+click drills into the group so this one seat can be moved/edited on its own.
         var groupBase = null;
         var last = { dx: 0, dy: 0 };
-        if (window.HallGroups && !e.altKey) {
+        var sectionBounds = window.SeatBoundsOverride;
+        if (!sectionBounds && window.HallGroups && !e.altKey) {
             var gkey = ensureSeatKey(el._st);
             var g = window.HallGroups.groupOf("seat", gkey);
             if (g) {
@@ -230,11 +323,34 @@
         function move(ev) {
             var dx = (ev.clientX - startX) / scaleX;
             var dy = (ev.clientY - startY) / scaleY;
+            if (sectionBounds) {
+                dx = Math.round(dx);
+                dy = Math.round(dy);
+                function fitsAt(x, y) {
+                    return moving.every(function (m) {
+                        return seatFitsSection(m.el._st, m.ox + x, m.oy + y, sectionBounds);
+                    });
+                }
+                if (!fitsAt(dx, dy)) {
+                    // Approach the edge from the last accepted position using a shared
+                    // offset so selected seats keep their spacing.
+                    var low = 0, high = 1;
+                    for (var i = 0; i < 12; i++) {
+                        var fraction = (low + high) / 2;
+                        var x = Math.round(last.dx + (dx - last.dx) * fraction);
+                        var y = Math.round(last.dy + (dy - last.dy) * fraction);
+                        if (fitsAt(x, y)) { low = fraction; } else { high = fraction; }
+                    }
+                    dx = Math.round(last.dx + (dx - last.dx) * low);
+                    dy = Math.round(last.dy + (dy - last.dy) * low);
+                    if (!fitsAt(dx, dy)) { return; }
+                }
+            }
             last.dx = dx; last.dy = dy;
             moving.forEach(function (m) {
                 m.el._st.x = Math.round(m.ox + dx);
                 m.el._st.y = Math.round(m.oy + dy);
-                clampPosition(m.el);
+                if (!sectionBounds) { clampPosition(m.el); }
                 render(m.el);
             });
             ensureCanvasFits(moving.map(function (m) { return m.el._st; }));
@@ -418,9 +534,21 @@
     }
 
     // --- Inspector controls --------------------------------------------------
-    inSection.addEventListener("input", function () {
-        var v = inSection.value.trim();
-        applyToSelection(function (el) { el._st.section = v; });
+    inSection.addEventListener("change", function () {
+        var name = inSection.value.trim();
+        var editor = window.HallSectionEditor;
+        var section = name && editor && editor.getSections().find(function (candidate) {
+            return candidate.mode === "SEATED" && candidate.name.toLowerCase() === name.toLowerCase();
+        });
+        if (name && !section) {
+            refreshInspector();
+            statusEl.textContent = "Enter the name of a seated section.";
+            return;
+        }
+        applyToSelection(function (el) {
+            el._st.section = section ? section.name : "";
+            el._st.sectionKey = section ? section.key : "";
+        });
     });
     inRotation.addEventListener("input", function () {
         var v = clamp(int(inRotation.value, 0), -180, 180);
@@ -428,12 +556,12 @@
         applyToSelection(function (el) { el._st.rot = v; });
     });
     inWidth.addEventListener("change", function () {
-        var v = clamp(int(inWidth.value, DEF_W), 12, 120);
+        var v = clamp(int(inWidth.value, DEF_W), MIN_SEAT_SIZE, MAX_SEAT_SIZE);
         inWidth.value = v;
         applyToSelection(function (el) { el._st.w = v; clampPosition(el); });
     });
     inHeight.addEventListener("change", function () {
-        var v = clamp(int(inHeight.value, DEF_H), 12, 120);
+        var v = clamp(int(inHeight.value, DEF_H), MIN_SEAT_SIZE, MAX_SEAT_SIZE);
         inHeight.value = v;
         applyToSelection(function (el) { el._st.h = v; clampPosition(el); });
     });
@@ -457,7 +585,11 @@
     function createChip(st, parent) {
         var el = document.createElement("span");
         ensureSeatKey(st);
+        if (window.SeatBoundsOverride && st.id == null) {
+            st.sectionKey = window.SeatBoundsOverride.sectionKey;
+        }
         el._st = st;
+        el.classList.add("seat-chip");
         el.addEventListener("pointerdown", onSeatPointerDown);
         (parent || canvas).appendChild(el);
         chips.push(el);
@@ -484,7 +616,8 @@
         return {
             w: source ? source.w : DEF_W,
             h: source ? source.h : DEF_H,
-            section: source ? source.section : ""
+            section: source ? source.section : "",
+            sectionKey: source ? source.sectionKey || undefined : undefined
         };
     }
 
@@ -501,7 +634,8 @@
             gapY: readGap(gridGapY, GAP_Y - DEF_H),
             seatWidth: template.w,
             seatHeight: template.h,
-            section: template.section
+            section: template.section,
+            sectionKey: template.sectionKey
         };
         if (normalize) {
             if (gridColumns) { gridColumns.value = spec.columns; }
@@ -549,25 +683,31 @@
     }
 
     function contentBounds() {
-        var right = 0;
+        var left = Infinity;
+        var right = -Infinity;
         var bottom = STAGE_CLEAR_BOTTOM;
         chips.forEach(function (el) {
             var bounds = stateBounds(el._st);
+            left = Math.min(left, bounds.left);
             right = Math.max(right, bounds.right);
             bottom = Math.max(bottom, bounds.bottom);
         });
         (tableEls || []).forEach(function (el) {
             var t = el._tt;
             var bounds = stateBounds({ x: t.x, y: t.y, w: t.w, h: t.d, rot: t.rot });
+            left = Math.min(left, bounds.left);
             right = Math.max(right, bounds.right);
             bottom = Math.max(bottom, bounds.bottom);
         });
         if (window.HallSectionEditor && window.HallSectionEditor.getBounds) {
             var sectionBounds = window.HallSectionEditor.getBounds();
-            right = Math.max(right, sectionBounds.right || 0);
-            bottom = Math.max(bottom, sectionBounds.bottom || 0);
+            if (sectionBounds) {
+                left = Math.min(left, sectionBounds.left);
+                right = Math.max(right, sectionBounds.right);
+                bottom = Math.max(bottom, sectionBounds.bottom);
+            }
         }
-        return { right: right, bottom: bottom };
+        return { left: isFinite(left) ? left : 0, right: isFinite(right) ? right : 0, bottom: bottom };
     }
 
     function minimumCanvasSize() {
@@ -630,10 +770,27 @@
         }
     }
 
+    function translateContentsX(pixels) {
+        chips.forEach(function (el) {
+            el._st.x += pixels;
+            render(el);
+        });
+        tableEls.forEach(function (el) {
+            el._tt.x += pixels;
+            renderTable(el);
+        });
+    }
+
     function fitCanvasToContents() {
         if (!editing) { return; }
-        var minimum = minimumCanvasSize();
-        setCanvasSize(minimum.width, minimum.height);
+        var bounds = contentBounds();
+        var width = Math.max(320, Math.ceil(bounds.right - bounds.left + 2 * LAYOUT_MARGIN));
+        var dx = Math.round(width / 2 - (bounds.left + bounds.right) / 2);
+        if (dx) {
+            translateContentsX(dx);
+            if (window.HallSectionEditor) { window.HallSectionEditor.translateSectionsX(dx); }
+        }
+        setCanvasSize(width, Math.max(240, Math.ceil(bounds.bottom + LAYOUT_MARGIN)));
         markDirty();
     }
 
@@ -806,7 +963,8 @@
                     w: spec.seatWidth,
                     h: spec.seatHeight,
                     rot: 0,
-                    section: spec.section
+                    section: spec.section,
+                    sectionKey: spec.sectionKey
                 });
             }
         }
@@ -847,7 +1005,8 @@
                 id: null, label: rl + c, rowLabel: rl, r: newR, c: c,
                 x: columnX(c, template.w), y: y,
                 w: template.w, h: template.h, rot: 0,
-                section: template.section
+                section: template.section,
+                sectionKey: template.sectionKey
             });
         }
         commitSeatPlan(states, "another row");
@@ -865,7 +1024,8 @@
                 id: null, label: rl + newC, rowLabel: rl, r: r, c: newC,
                 x: Math.ceil(stateBounds(source).right + gap), y: source.y,
                 w: source.w, h: source.h, rot: 0,
-                section: source.section
+                section: source.section,
+                sectionKey: source.sectionKey
             });
         });
         commitSeatPlan(states, "another column");
@@ -892,7 +1052,8 @@
             id: null, label: rl + c, rowLabel: rl, r: r, c: c,
             x: x, y: y,
             w: template.w, h: template.h, rot: 0,
-            section: template.section
+            section: template.section,
+            sectionKey: template.sectionKey
         }], "another seat");
     });
 
@@ -962,7 +1123,7 @@
         selectRelatedSeats(function (el) { return el._st.c === column; }, "That column has no seats.");
     });
     on("selectSectionSeats", function () {
-        var section = primary && primary._st.section;
+        var section = primary && primary._st.sectionKey;
         if (!primary) {
             statusEl.textContent = "Select a seat first.";
             statusEl.className = "layout-status";
@@ -974,7 +1135,7 @@
             return;
         }
         selectRelatedSeats(function (el) {
-            return el._st.section === section;
+            return el._st.sectionKey === section;
         }, "That section has no seats.");
     });
     on("selectAllSeats", function () { setSelection(chips.slice()); });
@@ -1255,7 +1416,13 @@
         if (!requireSel(1)) { return; }
         arrangeSafely(function () {
             var left, right, top, bottom, cX, cY;
-            if (selection.length === 1) {
+            var b = window.SeatBoundsOverride;
+            if (b) {
+                // Section Edit view: always align to the SECTION bbox, never the canvas.
+                // This way "Center" / "Left" / "Top" stay inside the section even with one seat.
+                left = b.left; right = b.right; top = b.top; bottom = b.bottom;
+                cX = (b.left + b.right) / 2; cY = (b.top + b.bottom) / 2;
+            } else if (selection.length === 1) {
                 left = 0; right = W; top = 0; bottom = H; cX = W / 2; cY = H / 2;
             } else {
                 left = Math.min.apply(null, selection.map(function (e) { return e._st.x; }));
@@ -2020,7 +2187,8 @@
                     layoutWidth: s.w,
                     layoutHeight: s.h,
                     rotationDegrees: s.rot,
-                    sectionName: s.section || null
+                    sectionName: s.section || null,
+                    sectionKey: s.sectionKey || ""
                 };
             }),
             layoutObjects: tablePayload(),
@@ -2086,10 +2254,11 @@
                 c: importNumber(item.seatNumber, at + " number", 1, 100000),
                 x: importNumber(item.layoutX, at + " X", 0, 1000000),
                 y: importNumber(item.layoutY, at + " Y", 0, 1000000),
-                w: importNumber(item.layoutWidth, at + " width", 12, 120),
-                h: importNumber(item.layoutHeight, at + " height", 12, 120),
+                w: importNumber(item.layoutWidth, at + " width", MIN_SEAT_SIZE, MAX_SEAT_SIZE),
+                h: importNumber(item.layoutHeight, at + " height", MIN_SEAT_SIZE, MAX_SEAT_SIZE),
                 rot: importNumber(item.rotationDegrees, at + " rotation", -180, 180),
-                section: typeof item.sectionName === "string" ? item.sectionName : ""
+                section: typeof item.sectionName === "string" ? item.sectionName : "",
+                sectionKey: typeof item.sectionKey === "string" ? item.sectionKey : undefined
             };
         });
 
@@ -2126,12 +2295,20 @@
             throw new Error("The layout contains too many sections.");
         }
         var sectionNames = Object.create(null);
+        var sectionKeys = new Set();
+        var seatedSectionKeys = new Set();
         var sections = rawSections.map(function (item, index) {
             var at = "Section " + (index + 1);
             var name = typeof item.name === "string" ? item.name.trim() : "";
             if (!name) { throw new Error(at + " needs a name."); }
             if (sectionNames[name]) { throw new Error("Duplicate section name: " + name + "."); }
             sectionNames[name] = true;
+            var clientKey = typeof item.clientKey === "string" ? item.clientKey : undefined;
+            if (clientKey && sectionKeys.has(clientKey)) { throw new Error("Duplicate section reference."); }
+            if (clientKey) {
+                sectionKeys.add(clientKey);
+                if (item.bookingMode !== "GENERAL_ADMISSION") { seatedSectionKeys.add(clientKey); }
+            }
             var points = Array.isArray(item.points) ? item.points : [];
             if (points.length > 2000) { throw new Error(at + " has too many boundary points."); }
             var mode = item.bookingMode === "GENERAL_ADMISSION"
@@ -2145,6 +2322,8 @@
             return {
                 id: importOptionalId(item.id),
                 name: name,
+                clientKey: clientKey,
+                serviceFeePerTicket: item.serviceFeePerTicket,
                 bookingMode: mode,
                 currency: typeof item.currency === "string" ? item.currency : null,
                 capacity: capacity,
@@ -2161,6 +2340,10 @@
             };
         });
 
+        if (seats.some(function (seat) { return seat.sectionKey && !seatedSectionKeys.has(seat.sectionKey); })) {
+            throw new Error("The layout references a missing or non-seated section.");
+        }
+
         return {
             sourceHallId: importOptionalId(raw.sourceHallId),
             width: importNumber(raw.layoutWidth, "Layout width", 320, 12000),
@@ -2172,6 +2355,9 @@
     }
 
     function replaceWithImportedLayout(layout) {
+        if (window.HallSectionEditor && window.HallSectionEditor.hasOverlappingSections(layout.sections)) {
+            throw new Error("The imported layout contains overlapping sections.");
+        }
         var sameHall = hallId != null && layout.sourceHallId === hallId;
         var existingSeatIds = Object.create(null);
         var existingTableIds = Object.create(null);
@@ -2186,8 +2372,9 @@
         clearTableSelection();
         setCanvasSize(layout.width, layout.height);
 
+        var importedSectionKeys = new Map();
         if (window.HallSectionEditor && window.HallSectionEditor.replaceAll) {
-            window.HallSectionEditor.replaceAll(layout.sections, {
+            importedSectionKeys = window.HallSectionEditor.replaceAll(layout.sections, {
                 preserveIds: sameHall,
                 silent: true
             });
@@ -2199,6 +2386,7 @@
         chips = [];
         var created = createChips(layout.seats.map(function (seat) {
             var state = copy(seat);
+            if (seat.sectionKey) { state.sectionKey = importedSectionKeys.get(seat.sectionKey); }
             state.id = sameHall && state.id != null && existingSeatIds[state.id]
                 ? state.id
                 : null;
@@ -2326,7 +2514,33 @@
     });
 
     // --- Save ----------------------------------------------------------------
+    function validateSeatPlacements() {
+        var editor = window.HallSectionEditor;
+        if (!editor) { return []; }
+        var polygons = new Map(editor.getSections().filter(function (section) {
+            return section.mode === "SEATED";
+        }).map(function (section) { return [section.key, { polygon: section.points }]; }));
+        return chips.filter(function (el) {
+            var seat = el._st;
+            var bounds = polygons.get(seat.sectionKey);
+            var invalid = !!seat.sectionKey && (!bounds || !seatFitsSection(seat, seat.x, seat.y, bounds));
+            el.classList.toggle("seat-placement-invalid", editing && invalid);
+            return invalid;
+        });
+    }
+
     btnSave.addEventListener("click", function () {
+        if (window.HallSectionEditor && window.HallSectionEditor.hasOverlappingSections()) {
+            statusEl.textContent = "Separate overlapping sections before saving.";
+            statusEl.className = "layout-status error-text";
+            return;
+        }
+        var invalid = validateSeatPlacements();
+        if (invalid.length) {
+            statusEl.textContent = invalid.length + " seat(s) outside their assigned sections. First: " + invalid[0]._st.label + ".";
+            statusEl.className = "layout-status error-text";
+            return;
+        }
         var payload = {
             layoutWidth: W,
             layoutHeight: H,
@@ -2343,7 +2557,8 @@
                     rotationDegrees: s.rot,
                     layoutWidth: s.w,
                     layoutHeight: s.h,
-                    sectionName: s.section ? s.section : null
+                    sectionName: s.section ? s.section : null,
+                    sectionKey: s.sectionKey || ""
                 };
             }),
             layoutObjects: tablePayload(),
@@ -2374,10 +2589,13 @@
             // New seats now have server IDs — match them back by label so further edits update
             // (rather than duplicate) them.
             var idByLabel = {};
-            (hall.seats || []).forEach(function (s) { idByLabel[s.label] = s.id; });
+            (hall.seats || []).forEach(function (s) { idByLabel[s.label] = s; });
             chips.forEach(function (el) {
-                var id = idByLabel[el._st.label];
-                if (id != null) {
+                var saved = idByLabel[el._st.label];
+                if (saved) {
+                    var id = saved.id;
+                    el._st.sectionKey = saved.sectionId == null ? "" : "section:" + saved.sectionId;
+                    el._st.section = saved.sectionName || "";
                     el._st.id = id;
                     el._st.key = "seat:" + id;
                     el.dataset.id = id;
@@ -2444,8 +2662,14 @@
     window.HallSeatEditor = {
         getState: snapshot,
         isEditing: function () { return editing; },
+        setEditing: function (on) { setEditing(!!on); },
         ensureLayoutBounds: ensureLayoutBounds,
+        extendCanvasLeft: function (pixels) {
+            translateContentsX(pixels);
+            setCanvasSize(W + pixels, H);
+        },
         fitLayoutToContents: fitCanvasToContents,
+        validateSeatPlacements: validateSeatPlacements,
         subscribe: function (listener) {
             if (typeof listener !== "function") { return function () {}; }
             bridgeListeners.push(listener);
@@ -2466,6 +2690,97 @@
             });
             if (list.length) { clearTableSelection(); }
             setSelection(list);
+        },
+        // Re-clamps every seat in `sectionName` against SeatBoundsOverride (polygon-aware).
+        // Call this on entering the Section Edit view to pull any out-of-shape seats back in.
+        clampSeatsInSection: function (sectionName) {
+            if (!editing) { return; }
+            var want = String(sectionName || "").trim().toLowerCase();
+            var moved = false;
+            chips.forEach(function (el) {
+                var s = el._st;
+                if (window.SeatBoundsOverride && window.SeatBoundsOverride.sectionKey
+                    ? s.sectionKey !== window.SeatBoundsOverride.sectionKey
+                    : String(s.section || "").trim().toLowerCase() !== want) { return; }
+                var before = s.x + ":" + s.y;
+                clampPosition(el);
+                if ((s.x + ":" + s.y) !== before) {
+                    moved = true;
+                    render(el);
+                }
+            });
+            if (moved) { markDirty(); }
+        },
+        // Find a complete layout before changing any seats. Count only slots whose full
+        // footprint fits, including along concave boundaries.
+        fitSeatsInSection: function (count, sectionName) {
+            var b = window.SeatBoundsOverride;
+            if (!editing || !b || !b.polygon || b.polygon.length < 3) {
+                return { error: "Open a section with a valid boundary in the seat editor." };
+            }
+            if (!Number.isInteger(count) || count < 1 || count > 5000) {
+                return { error: "Enter a whole number from 1 to 5,000." };
+            }
+
+            var left = Math.max(0, b.left), top = Math.max(0, b.top);
+            var width = b.right - left, height = b.bottom - top;
+            if (width <= 0 || height <= 0) {
+                return { error: "The section needs a boundary with positive width and height." };
+            }
+            var slots = [], bestCount = 0;
+            var size = Math.min(MAX_SEAT_SIZE, Math.floor(Math.sqrt(width * height / count)));
+            // Try the minimum even when the bounding rectangle cannot hold the target,
+            // so we can report how many slots the fitter found.
+            for (size = Math.max(MIN_SEAT_SIZE, size); size >= MIN_SEAT_SIZE; size--) {
+                var footprint = { w: size, h: size, rot: 0 };
+                var gap = Math.max(1, Math.round(size / 5));
+                var step = size + gap;
+                var cols = Math.floor((width + gap) / step);
+                var rows = Math.floor((height + gap) / step);
+                var originX = left + (width - cols * step + gap) / 2;
+                var originY = top + (height - rows * step + gap) / 2;
+                slots = [];
+                for (var ri = 0; ri < rows && slots.length < count; ri++) {
+                    for (var ci = 0; ci < cols && slots.length < count; ci++) {
+                        var x = Math.round(originX + ci * step);
+                        var y = Math.round(originY + ri * step);
+                        if (seatFitsSection(footprint, x, y, b)) { slots.push({ x: x, y: y, row: ri }); }
+                    }
+                }
+                if (slots.length === count) { break; }
+                bestCount = Math.max(bestCount, slots.length);
+            }
+            if (slots.length !== count) {
+                return { error: "Found " + bestCount + " of " + count
+                    + " seats at supported sizes. Existing seats were kept." };
+            }
+
+            var wantName = String(sectionName || "").trim().toLowerCase();
+            var existing = chips.filter(function (el) {
+                return b.sectionKey ? el._st.sectionKey === b.sectionKey
+                    : String(el._st.section || "").trim().toLowerCase() === wantName;
+            });
+            var firstRow = maxRow() + 1;
+            var row = -1, seatNumber = 0;
+            var states = slots.map(function (slot, i) {
+                if (slot.row !== row) { row = slot.row; seatNumber = 0; }
+                seatNumber++;
+                var rowLabel = letter(firstRow + row);
+                var state = existing[i] ? existing[i]._st : {
+                    id: null, label: rowLabel + seatNumber, rowLabel: rowLabel,
+                    r: firstRow + row, c: seatNumber, section: sectionName || ""
+                };
+                return Object.assign({}, state, {
+                    x: slot.x, y: slot.y, w: size, h: size, rot: 0
+                });
+            });
+
+            var removed = new Set(existing);
+            chips = chips.filter(function (el) { return !removed.has(el); });
+            existing.forEach(function (el) { el.remove(); });
+            ensureCanvasFits(states);
+            afterStructureChange(createChips(states));
+            return { created: states.length, seatSize: size };
         },
         getTables: tableSnapshot,
         selectTable: function (key) {
@@ -2521,8 +2836,8 @@
                 return {
                     id: null, label: rl + c, rowLabel: rl, r: r, c: c,
                     x: Math.round(sp.x), y: Math.round(sp.y),
-                    w: clamp(int(sp.w, DEF_W), 12, 120),
-                    h: clamp(int(sp.h, DEF_H), 12, 120),
+                    w: clamp(int(sp.w, DEF_W), MIN_SEAT_SIZE, MAX_SEAT_SIZE),
+                    h: clamp(int(sp.h, DEF_H), MIN_SEAT_SIZE, MAX_SEAT_SIZE),
                     rot: clamp(int(sp.rot, 0), -180, 180),
                     section: sp.section || ""
                 };
@@ -2573,8 +2888,9 @@
                 var el = findByKey(patch.key);
                 if (!el) { return; }
                 var section = typeof patch.section === "string" ? patch.section : "";
-                if (el._st.section === section) { return; }
+                if (el._st.section === section && el._st.sectionKey === patch.sectionKey) { return; }
                 el._st.section = section;
+                el._st.sectionKey = patch.sectionKey;
                 changed = true;
             });
             if (changed) {
@@ -2642,7 +2958,7 @@
         return {
             id: s.id, label: s.label, rowLabel: s.rowLabel, r: s.r, c: s.c,
             x: s.x, y: s.y, w: s.w, h: s.h, rot: s.rot, section: s.section,
-            key: s.key
+            key: s.key, sectionKey: s.sectionKey
         };
     }
     function letter(n) {

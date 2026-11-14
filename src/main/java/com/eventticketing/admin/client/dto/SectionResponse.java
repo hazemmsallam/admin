@@ -1,5 +1,6 @@
 package com.eventticketing.admin.client.dto;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 /** A hall section as returned by the ticketing API. Prices live on the event, not here. */
@@ -11,6 +12,7 @@ public record SectionResponse(
         Integer capacity,
         String shapeKind,
         List<PointItem> points,
-        String color
+        String color,
+        BigDecimal serviceFeePerTicket
 ) {
 }

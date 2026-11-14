@@ -1,5 +1,6 @@
 package com.eventticketing.admin.client.dto;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 /**
@@ -14,6 +15,8 @@ public record SectionItem(
         Integer capacity,
         String shapeKind,
         List<PointItem> points,
-        String color
+        String color,
+        String clientKey,
+        BigDecimal serviceFeePerTicket
 ) {
 }

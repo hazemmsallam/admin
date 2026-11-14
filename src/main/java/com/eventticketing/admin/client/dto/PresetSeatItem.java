@@ -8,6 +8,7 @@ public record PresetSeatItem(
         int height,
         int rotationDegrees,
         String sectionName,
-        Integer rowOffset
+        Integer rowOffset,
+        Integer sectionIndex
 ) {
 }

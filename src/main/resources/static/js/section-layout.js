@@ -50,6 +50,7 @@
     var draft = null;            // in-progress free-draw polygon
     var marquee = null;          // in-progress rubber-band rectangle
     var soloKey = null;          // section key being edited alone inside its group (Alt+click)
+    var activeGuides = {};
     var nextDraftKey = 1;
     var clipboard = null;        // copied block: sections + seats + tables, bbox-relative
 
@@ -78,11 +79,14 @@
     var btnGroup = document.getElementById("btnGroupSelection");
     var btnUngroup = document.getElementById("btnUngroupSelection");
     var btnSelectAll = document.getElementById("btnSelectLayout");
+    var rotationButtons = document.querySelectorAll("[data-section-rotation]");
+    var mirrorButtons = document.querySelectorAll("[data-section-mirror]");
     var btnDel = document.getElementById("btnSectionDelete");
     var inspector = document.getElementById("sectionInspector");
     var inName = document.getElementById("sxName");
     var inMode = document.getElementById("sxMode");
     var inCurrency = document.getElementById("sxCurrency");
+    var inFee = document.getElementById("sxServiceFee");
     var inCapacity = document.getElementById("sxCapacity");
     var capField = document.getElementById("sxCapacityField");
     var inColor = document.getElementById("sxColor");
@@ -106,6 +110,7 @@
             mode: s.bookingMode === "GENERAL_ADMISSION" ? "GENERAL_ADMISSION" : "SEATED",
             currency: s.currency || "JOD",
             capacity: s.capacity != null ? s.capacity : null,
+            serviceFeePerTicket: s.serviceFeePerTicket,
             color: s.color || PALETTE[sections.length % PALETTE.length],
             shapeKind: s.shapeKind || "POLYGON",
             points: (s.points || []).map(function (p) { return [num(p.x), num(p.y)]; })
@@ -202,8 +207,7 @@
             if (k === i) { next.push(mid); }          // the merged point replaces both ends
             else if (k !== (i + 1) % n) { next.push(s.points[k]); }
         }
-        s.points = next;
-        return true;
+        return applySectionPoints(s, next);
     }
 
     /**
@@ -221,8 +225,9 @@
             Math.round(c[0] + (mid[0] - c[0]) * f),
             Math.round(c[1] + (mid[1] - c[1]) * f)
         ];
-        s.points.splice(i + 1, 0, inner);
-        return true;
+        var points = s.points.slice();
+        points.splice(i + 1, 0, inner);
+        return applySectionPoints(s, points);
     }
 
     /** Folds every edge inward at once — the one-click star / spider web. */
@@ -239,7 +244,7 @@
                 Math.round(c[1] + (mid[1] - c[1]) * 0.55)
             ]);
         }
-        s.points = next;
+        return applySectionPoints(s, next);
     }
 
     /**
@@ -250,8 +255,9 @@
         var b = bbox(s.points);
         var cx = (b.minX + b.maxX) / 2, cy = (b.minY + b.maxY) / 2;
         var rx = Math.max(12, (b.maxX - b.minX) / 2), ry = Math.max(12, (b.maxY - b.minY) / 2);
-        s.points = regularPolygon(cx, cy, rx, ry, sides);
+        if (!applySectionPoints(s, regularPolygon(cx, cy, rx, ry, sides))) { return false; }
         s.shapeKind = sides === 5 ? "PENTAGON" : sides === 6 ? "HEXAGON" : "POLYGON";
+        return true;
     }
 
     // Adds a preset-shaped section centred on the canvas.
@@ -264,7 +270,8 @@
             bh = bw = Math.min(bw, bh);
         }
         var x = Math.round(w / 2 - bw / 2), y = Math.round(h / 2 - bh / 2);
-        addSection(shapePoints(kind, x, y, bw, bh), null, kind);
+        var points = shapePoints(kind, x, y, bw, bh);
+        addSection(placeNewSections([points])[0], null, kind);
     }
 
     /**
@@ -301,9 +308,10 @@
         var centre = [[ctTopL, y], [ctTopR, y], [ctBotR, yB], [ctBotL, yB]];
         var left   = [[leftTopX, y], [ctTopL, y], [ctBotL, yB], [leftBotX, yB]];
         var right  = [[ctTopR, y], [rightTopX, y], [rightBotX, yB], [ctBotR, yB]];
-        addSection(left,   "Left Wing",  "TRAPEZOID_LEFT");
-        addSection(centre, "Centre",     "TRAPEZOID");
-        addSection(right,  "Right Wing", "TRAPEZOID_RIGHT");
+        var placed = placeNewSections([left, centre, right]);
+        addSection(placed[0], "Left Wing", "TRAPEZOID_LEFT");
+        addSection(placed[1], "Centre", "TRAPEZOID");
+        addSection(placed[2], "Right Wing", "TRAPEZOID_RIGHT");
     }
 
     ensureSectionsFit(sections);
@@ -373,6 +381,9 @@
             if (editing && reason === "change" && syncSeatSections()) {
                 notify();
             }
+            if (reason === "change" || reason === "mode") {
+                window.HallSeatEditor.validateSeatPlacements();
+            }
             if (!editing || syncingSeats) { return; }
             // Follow the user's focus: seats -> tab 1, tables -> tab 3.
             if (reason === "selection" && state.selectedKeys && state.selectedKeys.length) {
@@ -398,6 +409,7 @@
             shapeKind: shapeKind || "POLYGON",
             points: points
         };
+        if (!applySectionPoints(s, points)) { return null; }
         sections.push(s);
         renderAll();
         select(s);
@@ -430,7 +442,7 @@
         }
         var target = Math.min(MAX_SIDES, Math.max(MIN_SIDES, n + delta));
         if (target === n) { return; }
-        setSides(s, target);
+        if (!setSides(s, target)) { return; }
         renderAll();
         refreshShapeTools();
         markDirty();
@@ -468,7 +480,7 @@
                 setStatus("Too many sides to fold — try a pentagon or hexagon.");
                 return;
             }
-            invertAllEdges(s);
+            if (!invertAllEdges(s)) { return; }
             s.shapeKind = "POLYGON";
             renderAll();
             refreshShapeTools();
@@ -717,10 +729,17 @@
         // — via the seat editor — the grouped tables. Seats are left to the seat module's own drag.
         applyMemberBaseline: function (base, dx, dy, transient) {
             if (!base) { return; }
-            base.sections.forEach(function (b) {
-                var s = sectionByKey(b.key);
-                if (s) { s.points = b.pts.map(function (p) { return [Math.round(p[0] + dx), Math.round(p[1] + dy)]; }); }
-            });
+            var moving = base.sections.map(function (item) {
+                return { section: sectionByKey(item.key), points: item.pts.map(function (p) {
+                    return [Math.round(p[0] + dx), Math.round(p[1] + dy)];
+                }) };
+            }).filter(function (item) { return item.section; });
+            var moved = new Set(moving.map(function (item) { return item.section; }));
+            if (sectionsOverlap(moving, sections.filter(function (section) { return !moved.has(section); }))) {
+                setStatus("Sections cannot overlap.");
+                return;
+            }
+            moving.forEach(function (item) { item.section.points = item.points; });
             if (base.tables.length && window.HallSeatEditor && window.HallSeatEditor.applyTablePatch) {
                 window.HallSeatEditor.applyTablePatch(
                     base.tables.map(function (b) { return { key: b.key, x: b.x + dx, y: b.y + dy }; }),
@@ -754,6 +773,9 @@
             return sectionKeys.some(function (k) { return g.members.sections.indexOf(k) !== -1; }) ||
                 mixed.seats.some(function (k) { return g.members.seats.indexOf(k) !== -1; }) ||
                 mixed.tables.some(function (k) { return g.members.tables.indexOf(k) !== -1; });
+        });
+        [...rotationButtons, ...mirrorButtons].forEach(function (button) {
+            button.disabled = selection.length !== 1 || !editing || !!draft;
         });
         if (btnCopy) { btnCopy.disabled = total === 0; }
         if (btnDuplicate) { btnDuplicate.disabled = total === 0; }
@@ -937,6 +959,7 @@
                             bookingMode: s.mode,
                             currency: s.currency,
                             capacity: s.capacity,
+                            serviceFeePerTicket: s.serviceFeePerTicket,
                             shapeKind: s.shapeKind || "POLYGON",
                             points: s.points.map(function (p) { return { x: p[0], y: p[1] }; }),
                             color: s.color
@@ -948,7 +971,8 @@
                             width: q.w, height: q.h,
                             rotationDegrees: q.rot || 0,
                             sectionName: q.section || null,
-                            rowOffset: q.r != null ? q.r : null
+                            rowOffset: q.r != null ? q.r : null,
+                            sectionIndex: q.sectionIndex
                         };
                     }),
                     tables: block.tables.map(function (t) {
@@ -972,14 +996,14 @@
                 sections: (m.sections || []).map(function (s) {
                     return {
                         name: s.name, mode: s.bookingMode,
-                        currency: s.currency, capacity: s.capacity, color: s.color,
+                        currency: s.currency, capacity: s.capacity, serviceFeePerTicket: s.serviceFeePerTicket, color: s.color,
                         shapeKind: s.shapeKind,
                         points: (s.points || []).map(function (p) { return [p.x, p.y]; })
                     };
                 }),
                 seats: (m.seats || []).map(function (q) {
                     return { x: q.x, y: q.y, w: q.width, h: q.height, rot: q.rotationDegrees,
-                             section: q.sectionName, r: q.rowOffset };
+                             section: q.sectionName, r: q.rowOffset, sectionIndex: q.sectionIndex };
                 }),
                 tables: (m.tables || []).map(function (t) {
                     return { x: t.x, y: t.y, w: t.width, d: t.depth, z: t.z,
@@ -1116,6 +1140,7 @@
     }
 
     function refreshInspector() {
+        if (inFee) { inFee.value = selected?.serviceFeePerTicket ?? ""; }
         if (!inspector) { return; }
         if (!selected) { inspector.classList.add("hidden"); return; }
         inspector.classList.remove("hidden");
@@ -1127,6 +1152,11 @@
         if (capField) { capField.classList.toggle("hidden", selected.mode !== "GENERAL_ADMISSION"); }
     }
 
+    bind(inFee, "change", function () {
+        if (!inFee.checkValidity()) { inFee.reportValidity(); return; }
+        selected.serviceFeePerTicket = inFee.value === "" ? 1 : inFee.valueAsNumber;
+        markDirty();
+    });
     bind(inName, "input", function () { selected.name = inName.value; renderAll(); markDirty(); });
     bind(inMode, "change", function () {
         selected.mode = inMode.value === "GENERAL_ADMISSION" ? "GENERAL_ADMISSION" : "SEATED";
@@ -1177,10 +1207,14 @@
         var seats = [], tables = [];
         if (st) {
             (st.seats || []).forEach(function (q) {
-                if (seatSel.seats.indexOf(q.key) !== -1) { seats.push(q); }
+                if (seatSel.seats.indexOf(q.key) !== -1 || selection.some(function (section) {
+                    return section.mode === "SEATED" && section.key === q.sectionKey;
+                })) { seats.push(q); }
             });
             (st.tables || []).forEach(function (t) {
-                if (seatSel.tables.indexOf(t.key) !== -1) { tables.push(t); }
+                if (seatSel.tables.indexOf(t.key) !== -1 || selection.some(function (section) {
+                    return containsPoint(section.points, t.x + t.w / 2, t.y + t.d / 2);
+                })) { tables.push(t); }
             });
         }
         if (!selection.length && !seats.length && !tables.length) { return null; }
@@ -1196,13 +1230,14 @@
             sections: selection.map(function (s) {
                 return {
                     name: s.name, mode: s.mode, currency: s.currency,
-                    capacity: s.capacity, color: s.color, shapeKind: s.shapeKind,
+                    capacity: s.capacity, serviceFeePerTicket: s.serviceFeePerTicket, color: s.color, shapeKind: s.shapeKind,
                     points: s.points.map(function (p) { return [p[0] - box.minX, p[1] - box.minY]; })
                 };
             }),
             seats: seats.map(function (q) {
                 return { x: q.x - box.minX, y: q.y - box.minY, w: q.w, h: q.h,
-                         rot: q.rot, section: q.section, r: q.r };
+                         rot: q.rot, section: q.section, r: q.r,
+                         sectionIndex: selection.findIndex(function (section) { return section.key === q.sectionKey; }) };
             }),
             tables: tables.map(function (t) {
                 return { x: t.x - box.minX, y: t.y - box.minY, w: t.w, d: t.d,
@@ -1259,6 +1294,18 @@
     // applying a saved preset. Nothing is sent to the server: everything is an ordinary draft that
     // the normal "Save layout" persists.
     function stampBlock(block, spots, verb) {
+        spots = spots.filter(function (spot) {
+            var candidates = block.sections.map(function (section) {
+                return { points: section.points.map(function (point) {
+                    return [point[0] + spot.dx, point[1] + spot.dy];
+                }) };
+            });
+            return !sectionsOverlap(candidates, sections);
+        });
+        if (!spots.length) {
+            setStatus("No free space for the sections.");
+            return false;
+        }
         var seatKeys = [];
         var placed = spots[0];
         if (block.seats.length && window.HallSeatEditor && window.HallSeatEditor.createSeats) {
@@ -1292,7 +1339,7 @@
             var s = {
                 key: "sdraft:" + nextDraftKey++, id: null,
                 name: uniqueName(src.name), mode: src.mode,
-                currency: src.currency, capacity: src.capacity,
+                currency: src.currency, capacity: src.capacity, serviceFeePerTicket: src.serviceFeePerTicket,
                 color: src.color || PALETTE[sections.length % PALETTE.length],
                 shapeKind: src.shapeKind || "POLYGON",
                 points: src.points.map(function (p) { return [p[0] + placed.dx, p[1] + placed.dy]; })
@@ -1300,6 +1347,25 @@
             sections.push(s);
             return s;
         });
+        if (seatKeys.length) {
+            var placements = new Map(window.HallSeatEditor.getState().seats.map(function (seat) {
+                return [seat.key, seat];
+            }));
+            var assignments = seatKeys.map(function (key, index) {
+                var source = block.seats[index];
+                var seat = placements.get(key);
+                var section = source.sectionIndex == null
+                    ? fresh.find(function (candidate, i) {
+                        return candidate.mode === "SEATED" && block.sections[i].name === source.section;
+                    }) || fresh.find(function (candidate) {
+                        return candidate.mode === "SEATED" && containsPoint(candidate.points,
+                            seat.x + seat.w / 2, seat.y + seat.h / 2);
+                    })
+                    : fresh[source.sectionIndex];
+                return { key: key, section: section ? section.name : "", sectionKey: section ? section.key : "" };
+            });
+            window.HallSeatEditor.applySeatSectionPatch(assignments, { transient: true });
+        }
         ensureSectionsFit(fresh);
         // Keep the new seats selected alongside the new sections.
         setSelection(fresh, { additive: true });
@@ -1388,12 +1454,208 @@
 
     // Moves every selected section by (dx,dy), and any seats/tables grouped with them.
     function nudgeSelection(dx, dy) {
-        selection.forEach(function (s) {
-            s.points = s.points.map(function (p) { return [p[0] + dx, p[1] + dy]; });
+        var candidates = selection.map(function (section) {
+            return { points: section.points.map(function (p) { return [p[0] + dx, p[1] + dy]; }) };
         });
+        if (sectionsOverlap(candidates, sections.filter(function (section) { return !isSel(section); }))) {
+            setStatus("Sections cannot overlap.");
+            return;
+        }
+        selection.forEach(function (section, index) { section.points = candidates[index].points; });
         applyBaseline(groupedBaseline(selection), dx, dy, false);
         renderAll();
         markDirty();
+    }
+
+    function polygonsOverlap(a, b) {
+        if (a.length < 3 || b.length < 3) { return false; }
+        var first = bbox(a), second = bbox(b);
+        if (first.maxX <= second.minX || second.maxX <= first.minX
+            || first.maxY <= second.minY || second.maxY <= first.minY) { return false; }
+
+        function side(p, q, r) {
+            return (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]);
+        }
+        // A proper crossing gives the interiors a shared area.
+        if (a.some(function (p, i) {
+            var q = a[(i + 1) % a.length];
+            return b.some(function (r, j) {
+                var t = b[(j + 1) % b.length];
+                return side(p, q, r) * side(p, q, t) < 0 && side(r, t, p) * side(r, t, q) < 0;
+            });
+        })) { return true; }
+
+        // Between vertex heights the edges cannot change order without crossing.
+        // Compare filled intervals to catch containment and coincident boundaries.
+        function crossings(points, y) {
+            var xs = [];
+            points.forEach(function (p, i) {
+                var q = points[(i + 1) % points.length];
+                if ((p[1] > y) !== (q[1] > y)) {
+                    xs.push(p[0] + (q[0] - p[0]) * (y - p[1]) / (q[1] - p[1]));
+                }
+            });
+            return xs.sort(function (x, z) { return x - z; });
+        }
+        var heights = [...new Set(a.concat(b).map(function (p) { return p[1]; }))].sort(function (y, z) { return y - z; });
+        for (var n = 1; n < heights.length; n++) {
+            var y = (heights[n - 1] + heights[n]) / 2;
+            var left = crossings(a, y), right = crossings(b, y);
+            for (var i = 0, j = 0; i + 1 < left.length && j + 1 < right.length;) {
+                if (Math.min(left[i + 1], right[j + 1]) - Math.max(left[i], right[j]) > 1e-8) {
+                    return true;
+                }
+                if (left[i + 1] < right[j + 1]) { i += 2; } else { j += 2; }
+            }
+        }
+        return false;
+    }
+
+    function sectionsOverlap(items, neighbors) {
+        return items.some(function (item, index) {
+            return neighbors.some(function (other) { return polygonsOverlap(item.points, other.points); })
+                || items.slice(0, index).some(function (other) { return polygonsOverlap(item.points, other.points); });
+        });
+    }
+
+    function placeNewSections(polygons) {
+        var candidates = polygons.map(function (points) { return { points: points }; });
+        if (!sectionsOverlap(candidates, sections)) { return polygons; }
+        var offset = selectionBounds(sections, [], []).maxX + 24
+            - selectionBounds(candidates, [], []).minX;
+        return polygons.map(function (points) {
+            return points.map(function (point) { return [point[0] + offset, point[1]]; });
+        });
+    }
+
+    function applySectionPoints(section, points) {
+        if (sections.some(function (other) {
+            return other !== section && polygonsOverlap(points, other.points);
+        })) {
+            setStatus("Sections cannot overlap.");
+            return false;
+        }
+        section.points = points;
+        return true;
+    }
+
+    function alignmentTargets(excluded) {
+        var w = parseInt(canvas.dataset.w, 10) || 900;
+        var h = parseInt(canvas.dataset.h, 10) || 600;
+        var targets = { x: [w / 2], y: [h / 2] };
+        var stage = canvas.querySelector(".stage-abs");
+        if (stage) {
+            targets.x.push(stage.offsetLeft - stage.offsetWidth / 2,
+                stage.offsetLeft + stage.offsetWidth / 2);
+            targets.y.push(stage.offsetTop, stage.offsetTop + stage.offsetHeight);
+        }
+        sections.forEach(function (section) {
+            if (excluded.indexOf(section) !== -1 || !section.points.length) { return; }
+            var box = bbox(section.points);
+            targets.x.push(box.minX, (box.minX + box.maxX) / 2, box.maxX);
+            targets.y.push(box.minY, (box.minY + box.maxY) / 2, box.maxY);
+        });
+        return targets;
+    }
+
+    function snapAxis(axis, positions, offset, targets, bypass) {
+        delete activeGuides[axis];
+        if (bypass) { return offset; }
+        var rect = canvas.getBoundingClientRect();
+        var scale = axis === "x" ? rect.width / (parseInt(canvas.dataset.w, 10) || 900)
+            : rect.height / (parseInt(canvas.dataset.h, 10) || 600);
+        var nearest = 7 / (scale || 1);
+        var correction = 0;
+        targets[axis].forEach(function (target) {
+            positions.forEach(function (position) {
+                var delta = target - position - offset;
+                if (Math.abs(delta) < nearest) {
+                    nearest = Math.abs(delta);
+                    correction = delta;
+                    activeGuides[axis] = target;
+                }
+            });
+        });
+        return offset + correction;
+    }
+
+    // Match both endpoints with one translation so the shared edge keeps its length and angle.
+    function snapSharedEdge(movers, fixed, dx, dy, toleranceX, toleranceY) {
+        function winding(points) {
+            return Math.sign(points.reduce(function (area, a, i) {
+                var b = points[(i + 1) % points.length];
+                return area + a[0] * b[1] - a[1] * b[0];
+            }, 0));
+        }
+        var best = null, distance = 1;
+        var neighbors = fixed.map(function (section) {
+            return { points: section.points, side: winding(section.points) };
+        });
+        movers.forEach(function (moving) {
+            var side = winding(moving.pts);
+            if (!side) { return; }
+            moving.pts.forEach(function (a, i) {
+                var b = moving.pts[(i + 1) % moving.pts.length];
+                if (a[0] === b[0] && a[1] === b[1]) { return; }
+                neighbors.forEach(function (neighbor) {
+                    if (!neighbor.side) { return; }
+                    neighbor.points.forEach(function (c, j) {
+                        var d = neighbor.points[(j + 1) % neighbor.points.length];
+                        // Match edges only when the section interiors face opposite sides.
+                        var edge = side === neighbor.side ? [d, c] : [c, d];
+                        var x = edge[0][0] - a[0], y = edge[0][1] - a[1];
+                        if (b[0] + x !== edge[1][0] || b[1] + y !== edge[1][1]) { return; }
+                        var delta = Math.hypot((x - dx) / toleranceX, (y - dy) / toleranceY);
+                        if (delta < distance) {
+                            distance = delta;
+                            best = { dx: x, dy: y, edge: edge };
+                        }
+                    });
+                });
+            });
+        });
+        return best;
+    }
+
+    function renderGuides(w, h) {
+        function line(axis, pos, active) {
+            var guide = document.createElementNS(SVG_NS, "line");
+            guide.setAttribute("x1", axis === "x" ? pos : 0);
+            guide.setAttribute("x2", axis === "x" ? pos : w);
+            guide.setAttribute("y1", axis === "y" ? pos : 0);
+            guide.setAttribute("y2", axis === "y" ? pos : h);
+            guide.setAttribute("stroke", active ? "#d024a0" : "#657995");
+            guide.setAttribute("stroke-width", active ? "1.5" : "1");
+            guide.setAttribute("vector-effect", "non-scaling-stroke");
+            guide.setAttribute("pointer-events", "none");
+            if (!active) {
+                guide.setAttribute("stroke-dasharray", "5 5");
+                guide.setAttribute("opacity", "0.65");
+            }
+            svg.appendChild(guide);
+        }
+        line("x", w / 2, false);
+        if (activeGuides.edge) {
+            var edge = activeGuides.edge;
+            var shared = document.createElementNS(SVG_NS, "line");
+            shared.setAttribute("x1", edge[0][0]);
+            shared.setAttribute("y1", edge[0][1]);
+            shared.setAttribute("x2", edge[1][0]);
+            shared.setAttribute("y2", edge[1][1]);
+            shared.setAttribute("stroke", "#d024a0");
+            shared.setAttribute("stroke-width", "3");
+            shared.setAttribute("vector-effect", "non-scaling-stroke");
+            shared.setAttribute("pointer-events", "none");
+            svg.appendChild(shared);
+        }
+        ["x", "y"].forEach(function (axis) {
+            if (activeGuides[axis] !== undefined) { line(axis, activeGuides[axis], true); }
+        });
+    }
+
+    function clearGuides() {
+        activeGuides = {};
+        renderAll();
     }
 
     // --- Rendering ------------------------------------------------------------
@@ -1462,25 +1724,12 @@
                         edge.setAttribute("stroke", s.color);
                         edge.setAttribute("stroke-width", 1.5);
                         edge.style.pointerEvents = "all";
-                        edge.style.cursor = "pointer";
+                        edge.style.cursor = "grab";
                         var label = document.createElementNS(SVG_NS, "title");
-                        label.textContent = "Click: remove this side · Alt+click: fold it inward";
+                        label.textContent = "Drag this edge · Shift+click to remove · Alt+click to fold";
                         edge.appendChild(label);
                         edge.addEventListener("pointerdown", function (e) {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            if (e.altKey) {
-                                invertEdge(s, idx);
-                                setStatus("Folded a side inward. Alt+click more, or use Star for all at once.");
-                            } else if (!removeEdge(s, idx)) {
-                                return;
-                            } else {
-                                setStatus("Removed a side — the shape now has " + s.points.length + ".");
-                            }
-                            // The boundary changed, so seat membership may have too.
-                            s.shapeKind = "POLYGON";
-                            renderAll();
-                            markDirty();
+                            startSideDrag(e, s, idx);
                         });
                         svg.appendChild(edge);
                     });
@@ -1579,6 +1828,7 @@
             mr.style.pointerEvents = "none";
             svg.appendChild(mr);
         }
+        if (editing && !window.SeatBoundsOverride) { renderGuides(w, h); }
     }
 
     // --- Drag: whole section (+ any co-selected/grouped members) --------------
@@ -1595,37 +1845,103 @@
         // multi-selection intact if this section is already part of it.
         else if (!isSel(s) || (soloKey && soloKey !== s.key)) { soloKey = null; select(s); }
         var movers = selection.slice();
-        var start = toCanvas(e);
+        var box = selectionBounds(movers, [], []);
+        var targets = alignmentTargets(movers);
+        var fixed = sections.filter(function (section) { return movers.indexOf(section) === -1; })
+            .map(function (section) { return { points: section.points }; });
+        var addedLeft = 0;
+        var rect = canvas.getBoundingClientRect();
+        var toleranceX = 7 * (parseInt(canvas.dataset.w, 10) || 900) / Math.max(1, rect.width);
+        var toleranceY = 7 * (parseInt(canvas.dataset.h, 10) || 600) / Math.max(1, rect.height);
+        var unitsX = toleranceX / 7, unitsY = toleranceY / 7;
+        var shell = canvas.parentElement;
+        var scrollX = shell.scrollLeft, scrollY = shell.scrollTop;
         var orig = movers.map(function (m) { return { s: m, pts: m.points.map(function (p) { return [p[0], p[1]]; }) }; });
-        var base = groupedBaseline(movers);   // seats/tables to drag along, with start positions
+        var base = groupedBaseline(movers, { carrySectionSeats: true });
+        var minX = Math.min(box.minX, ...base.seats.map(function (q) { return q.x; }),
+            ...base.tables.map(function (q) { return q.x; }));
+        var minY = Math.min(box.minY, ...base.seats.map(function (q) { return q.y; }),
+            ...base.tables.map(function (q) { return q.y; }));
         var last = { dx: 0, dy: 0 };
         function move(ev) {
-            var p = toCanvas(ev);
-            var dx = p.x - start.x, dy = p.y - start.y;
-            last.dx = dx; last.dy = dy;
-            orig.forEach(function (o) {
-                o.s.points = o.pts.map(function (pt) { return [Math.round(pt[0] + dx), Math.round(pt[1] + dy)]; });
+            var dx = (ev.clientX - e.clientX + shell.scrollLeft - scrollX) * unitsX;
+            var dy = (ev.clientY - e.clientY + shell.scrollTop - scrollY) * unitsY;
+            activeGuides = {};
+            var match = ev.altKey ? null : snapSharedEdge(orig, fixed, dx, dy, toleranceX, toleranceY);
+            if (match) {
+                dx = match.dx;
+                dy = match.dy;
+                activeGuides.edge = match.edge;
+            } else {
+                dx = snapAxis("x", [(box.minX + box.maxX) / 2, box.minX, box.maxX], dx, targets, ev.altKey);
+                dy = snapAxis("y", [(box.minY + box.maxY) / 2, box.minY, box.maxY], dy, targets, ev.altKey);
+            }
+            var nextY = Math.max(dy, -minY);
+            if (nextY !== dy) { activeGuides = {}; }
+            dy = nextY;
+            var candidates = orig.map(function (item) {
+                return { points: item.pts.map(function (pt) {
+                    return [Math.round(pt[0] + dx + addedLeft), Math.round(pt[1] + dy)];
+                }) };
             });
-            applyBaseline(base, dx, dy, true);
+            if (sectionsOverlap(candidates, sections.filter(function (section) {
+                return movers.indexOf(section) === -1;
+            }))) {
+                clearGuides();
+                setStatus("Sections cannot overlap.");
+                return;
+            }
+            var needed = Math.max(0, Math.ceil(-(minX + dx + addedLeft)));
+            if (needed) {
+                // Rebase all coordinates together so persisted positions stay nonnegative.
+                sections.forEach(function (section) {
+                    section.points = section.points.map(function (pt) { return [pt[0] + needed, pt[1]]; });
+                });
+                addedLeft += needed;
+                window.HallSeatEditor.extendCanvasLeft(needed);
+            }
+            if (activeGuides.x !== undefined) { activeGuides.x += addedLeft; }
+            if (activeGuides.edge) {
+                activeGuides.edge = activeGuides.edge.map(function (pt) { return [pt[0] + addedLeft, pt[1]]; });
+            }
+            last.dx = dx + addedLeft; last.dy = dy;
+            orig.forEach(function (o) {
+                o.s.points = o.pts.map(function (pt) {
+                    return [Math.round(pt[0] + last.dx), Math.round(pt[1] + dy)];
+                });
+            });
+            ensureSectionsFit(movers);
+            applyBaseline(base, last.dx, dy, true);
             renderAll();
         }
         function up() {
             window.removeEventListener("pointermove", move);
             window.removeEventListener("pointerup", up);
+            window.removeEventListener("pointercancel", up);
             applyBaseline(base, last.dx, last.dy, false);   // commit (marks seat layout dirty once)
+            clearGuides();
             markDirty();
         }
         window.addEventListener("pointermove", move);
         window.addEventListener("pointerup", up);
+        window.addEventListener("pointercancel", up);
     }
 
     // Snapshot of the seats/tables grouped with `movingSections` and their positions right now,
     // so a drag/nudge can set absolute = start + delta without drift.
-    function groupedBaseline(movingSections) {
+    function groupedBaseline(movingSections, options) {
         var out = { seats: [], tables: [] };
         // While drilled into a single member (Alt+click), it moves alone — the rest of its group
         // stays put, which is the whole point of editing one item inside a group.
         if (!window.HallSeatEditor || soloKey) { return out; }
+        if (!window.SeatBoundsOverride) {
+            if (!options || !options.carrySectionSeats) { return out; }
+            var keys = new Set(movingSections.map(function (section) { return section.key; }));
+            out.seats = window.HallSeatEditor.getState().seats.filter(function (seat) {
+                return keys.has(seat.sectionKey);
+            });
+            return out;
+        }
         var seatKeys = {}, tableKeys = {};
         movingSections.forEach(function (s) {
             var g = Groups.groupOf("section", s.key);
@@ -1637,8 +1953,17 @@
         // Anything currently selected travels too, grouped or not — co-selection is intent enough.
         (state.selectedKeys || []).forEach(function (k) { seatKeys[k] = 1; });
         (state.tables || []).forEach(function (t) { if (t.selected) { tableKeys[t.key] = 1; } });
-        (state.seats || []).forEach(function (q) { if (seatKeys[q.key]) { out.seats.push({ key: q.key, x: q.x, y: q.y }); } });
-        (state.tables || []).forEach(function (q) { if (tableKeys[q.key]) { out.tables.push({ key: q.key, x: q.x, y: q.y }); } });
+        var sectionKeys = new Set(movingSections.map(function (section) { return section.key; }));
+        (state.seats || []).forEach(function (q) {
+            if (seatKeys[q.key] || sectionKeys.has(q.sectionKey)) {
+                out.seats.push(q);
+            }
+        });
+        (state.tables || []).forEach(function (q) {
+            if (tableKeys[q.key] || movingSections.some(function (section) {
+                return containsPoint(section.points, q.x + q.w / 2, q.y + q.d / 2);
+            })) { out.tables.push(q); }
+        });
         return out;
     }
 
@@ -1656,23 +1981,87 @@
         }
     }
 
+    function startSideDrag(e, section, index) {
+        if (!editing || draft || e.button !== 0) { return; }
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.altKey || e.shiftKey) {
+            if (e.altKey) {
+                if (!invertEdge(section, index)) { return; }
+                setStatus("Folded the side inward.");
+            } else if (!removeEdge(section, index)) {
+                return;
+            } else {
+                setStatus("Removed a side.");
+            }
+            section.shapeKind = "POLYGON";
+            markDirty();
+            renderAll();
+            return;
+        }
+
+        var next = (index + 1) % section.points.length;
+        var a = section.points[index], b = section.points[next];
+        var length = Math.hypot(b[0] - a[0], b[1] - a[1]);
+        if (!length) { return; }
+        var normalX = (a[1] - b[1]) / length;
+        var normalY = (b[0] - a[0]) / length;
+        var start = toCanvas(e);
+        var changed = false;
+        function move(ev) {
+            if (ev.pointerId !== e.pointerId) { return; }
+            var cursor = toCanvas(ev);
+            var distance = (cursor.x - start.x) * normalX + (cursor.y - start.y) * normalY;
+            var dx = Math.round(distance * normalX), dy = Math.round(distance * normalY);
+            if (Math.min(a[0], b[0]) + dx < 0 || Math.min(a[1], b[1]) + dy < 0) { return; }
+            if (section.points[index][0] === a[0] + dx && section.points[index][1] === a[1] + dy) { return; }
+            var points = section.points.slice();
+            points[index] = [a[0] + dx, a[1] + dy];
+            points[next] = [b[0] + dx, b[1] + dy];
+            if (!applySectionPoints(section, points)) { return; }
+            section.shapeKind = "POLYGON";
+            changed = true;
+            ensureSectionsFit([section]);
+            renderAll();
+        }
+        function end(ev) {
+            if (ev.pointerId !== e.pointerId) { return; }
+            window.removeEventListener("pointermove", move);
+            window.removeEventListener("pointerup", end);
+            window.removeEventListener("pointercancel", end);
+            if (changed) { markDirty(); }
+        }
+        window.addEventListener("pointermove", move);
+        window.addEventListener("pointerup", end);
+        window.addEventListener("pointercancel", end);
+    }
+
     // --- Drag: single vertex --------------------------------------------------
     function startVertex(e, s, idx) {
         if (!editing) { return; }
         e.preventDefault();
         e.stopPropagation();
+        var targets = alignmentTargets([s]);
         function move(ev) {
             var p = toCanvas(ev);
-            s.points[idx] = [Math.round(p.x), Math.round(p.y)];
+            var points = s.points.slice();
+            points[idx] = [
+                Math.round(snapAxis("x", [0], p.x, targets, ev.altKey)),
+                Math.round(snapAxis("y", [0], p.y, targets, ev.altKey))
+            ];
+            if (!applySectionPoints(s, points)) { clearGuides(); return; }
             renderAll();
         }
         function up() {
             window.removeEventListener("pointermove", move);
             window.removeEventListener("pointerup", up);
+            window.removeEventListener("pointercancel", up);
+            clearGuides();
             markDirty();
         }
         window.addEventListener("pointermove", move);
         window.addEventListener("pointerup", up);
+        window.addEventListener("pointercancel", up);
     }
 
     // --- Symmetric resize: scale whole shape about its centre -----------------
@@ -1680,6 +2069,7 @@
         if (!editing || draft) { return; }
         e.preventDefault();
         e.stopPropagation();
+        var targets = alignmentTargets([s]);
         var bb = bbox(s.points);
         var cx = (bb.minX + bb.maxX) / 2, cy = (bb.minY + bb.maxY) / 2;
         var orig = s.points.map(function (p) { return [p[0], p[1]]; });
@@ -1694,14 +2084,16 @@
             var half = Math.hypot(bb.maxX - cx, bb.maxY - cy);
             if (half * scale < 12) { scale = 12 / half; }
             if (half * scale > 4000) { scale = 4000 / half; }
-            s.points = orig.map(function (o) {
+            var points = orig.map(function (o) {
                 return [Math.round(cx + (o[0] - cx) * scale), Math.round(cy + (o[1] - cy) * scale)];
             });
+            if (!applySectionPoints(s, points)) { clearGuides(); return; }
             renderAll();
         }
         function up() {
             window.removeEventListener("pointermove", move);
             window.removeEventListener("pointerup", up);
+            clearGuides();
             markDirty();
         }
         window.addEventListener("pointermove", move);
@@ -1715,6 +2107,7 @@
         if (!editing || draft) { return; }
         e.preventDefault();
         e.stopPropagation();
+        var targets = alignmentTargets([s]);
         var bb = bbox(s.points);
         var horizontal = (dir === "e" || dir === "w");
         var anchor = dir === "e" ? bb.minX : dir === "w" ? bb.maxX : dir === "s" ? bb.minY : bb.maxY;
@@ -1724,65 +2117,157 @@
         function move(ev) {
             var p = toCanvas(ev);
             var pos = horizontal ? p.x : p.y;
+            pos = snapAxis(horizontal ? "x" : "y", [0], pos, targets, ev.altKey);
             var scale = (pos - anchor) / (span * ((dir === "w" || dir === "n") ? -1 : 1));
             // Keep the dragged edge on the moving side of the anchor (no inversion) and ≥ ~12px.
             if (span * scale < 12) { scale = 12 / span; }
             if (span * scale > 4000) { scale = 4000 / span; }
-            s.points = orig.map(function (o) {
+            var points = orig.map(function (o) {
                 if (horizontal) { return [Math.round(anchor + (o[0] - anchor) * scale), o[1]]; }
                 return [o[0], Math.round(anchor + (o[1] - anchor) * scale)];
             });
+            if (!applySectionPoints(s, points)) { clearGuides(); return; }
             renderAll();
         }
         function up() {
             window.removeEventListener("pointermove", move);
             window.removeEventListener("pointerup", up);
+            window.removeEventListener("pointercancel", up);
+            clearGuides();
             markDirty();
         }
         window.addEventListener("pointermove", move);
         window.addEventListener("pointerup", up);
+        window.addEventListener("pointercancel", up);
     }
 
     // --- Rotate: spin whole shape about its centre ----------------------------
+    function sectionRotation(s) {
+        var bb = bbox(s.points);
+        var cx = (bb.minX + bb.maxX) / 2, cy = (bb.minY + bb.maxY) / 2;
+        var orig = s.points.map(function (p) { return p.slice(); });
+        var editor = window.SeatBoundsOverride && window.HallSeatEditor;
+        var state = editor ? editor.getState() : { seats: [], tables: [] };
+        var seats = s.mode === "SEATED" ? state.seats.filter(function (seat) {
+            return seat.sectionKey === s.key;
+        }) : [];
+        var tables = state.tables.filter(function (table) {
+            return containsPoint(orig, table.x + table.w / 2, table.y + table.d / 2);
+        });
+        return function (delta) {
+            var cos = Math.cos(delta), sin = Math.sin(delta);
+            var degrees = delta * 180 / Math.PI;
+
+            function rotate(x, y) {
+                return [cx + (x - cx) * cos - (y - cy) * sin,
+                        cy + (x - cx) * sin + (y - cy) * cos];
+            }
+            function rotateObject(object, height) {
+                var center = rotate(object.x + object.w / 2, object.y + height / 2);
+                var angle = Math.round(object.rot + degrees);
+                return {
+                    key: object.key,
+                    x: Math.round(center[0] - object.w / 2),
+                    y: Math.round(center[1] - height / 2),
+                    rot: ((angle % 360) + 540) % 360 - 180
+                };
+            }
+
+            var points = orig.map(function (point) { return rotate(point[0], point[1]).map(Math.round); });
+            var seatPatches = seats.map(function (seat) { return rotateObject(seat, seat.h); });
+            var tablePatches = tables.map(function (table) { return rotateObject(table, table.d); });
+            // Reject a turn that would clip the section or force individual items
+            // to be clamped, which would distort their positions inside the section.
+            if (points.some(function (point) { return point[0] < 0 || point[1] < 0; })
+                || seatPatches.concat(tablePatches).some(function (patch) { return patch.x < 0 || patch.y < 0; })) {
+                return;
+            }
+            if (!applySectionPoints(s, points)) { return false; }
+            ensureSectionsFit([s]);
+            if (seatPatches.length) { editor.applySpatialPatch(seatPatches, { transient: true }); }
+            if (tablePatches.length) { editor.applyTablePatch(tablePatches, { transient: true }); }
+            renderAll();
+            return true;
+        };
+    }
+
+    rotationButtons.forEach(function (button) {
+        button.addEventListener("click", function () {
+            if (!editing || draft || selection.length !== 1) { return; }
+            var degrees = Number(button.dataset.sectionRotation);
+            if (degrees === 360) {
+                setStatus("360° is a full turn.");
+                return;
+            }
+            if (sectionRotation(selected)(degrees * Math.PI / 180)) {
+                markDirty();
+                setStatus("Rotated section " + degrees + "° clockwise.");
+            } else {
+                setStatus("Move the section away from the canvas edge before rotating.");
+            }
+        });
+    });
+
+    mirrorButtons.forEach(function (button) {
+        button.addEventListener("click", function () {
+            if (!editing || draft || selection.length !== 1) { return; }
+            var horizontal = button.dataset.sectionMirror === "horizontal";
+            var box = bbox(selected.points);
+            var points = selected.points.map(function (point) {
+                return horizontal
+                    ? [box.minX + box.maxX - point[0], point[1]]
+                    : [point[0], box.minY + box.maxY - point[1]];
+            });
+            if (!applySectionPoints(selected, points)) { return; }
+            renderAll();
+            markDirty();
+            setStatus(horizontal ? "Mirrored section left to right." : "Mirrored section top to bottom.");
+        });
+    });
+
     function startRotate(e, s) {
         if (!editing || draft) { return; }
         e.preventDefault();
         e.stopPropagation();
-        var bb = bbox(s.points);
-        var cx = (bb.minX + bb.maxX) / 2, cy = (bb.minY + bb.maxY) / 2;
-        var orig = s.points.map(function (p) { return [p[0], p[1]]; });
+        var rotate = sectionRotation(s);
+        var box = bbox(s.points);
+        var cx = (box.minX + box.maxX) / 2, cy = (box.minY + box.maxY) / 2;
         var start = toCanvas(e);
-        var a0 = Math.atan2(start.y - cy, start.x - cx);
+        var initialAngle = Math.atan2(start.y - cy, start.x - cx);
         function move(ev) {
             var p = toCanvas(ev);
-            var delta = Math.atan2(p.y - cy, p.x - cx) - a0;
-            var cos = Math.cos(delta), sin = Math.sin(delta);
-            s.points = orig.map(function (o) {
-                var dx = o[0] - cx, dy = o[1] - cy;
-                return [Math.round(cx + dx * cos - dy * sin), Math.round(cy + dx * sin + dy * cos)];
-            });
-            renderAll();
+            rotate(Math.atan2(p.y - cy, p.x - cx) - initialAngle);
         }
         function up() {
             window.removeEventListener("pointermove", move);
             window.removeEventListener("pointerup", up);
+            window.removeEventListener("pointercancel", up);
             markDirty();
         }
         window.addEventListener("pointermove", move);
         window.addEventListener("pointerup", up);
+        window.addEventListener("pointercancel", up);
     }
 
     // --- Public bridge --------------------------------------------------------
     window.HallSectionEditor = {
         // The payload sent to PUT /halls/{id}/seats as `sections`.
+        hasOverlappingSections: function (items) {
+            var candidates = items ? items.map(function (section) {
+                return { points: section.points.map(function (point) { return [point.x, point.y]; }) };
+            }) : sections;
+            return sectionsOverlap(candidates, []);
+        },
         serialize: function () {
             return sections.map(function (s) {
                 return {
                     id: s.id,
+                    clientKey: s.key,
                     name: s.name,
                     bookingMode: s.mode,
                     currency: s.currency || null,
                     capacity: s.mode === "GENERAL_ADMISSION" ? s.capacity : null,
+                    serviceFeePerTicket: s.serviceFeePerTicket,
                     shapeKind: s.shapeKind || "POLYGON",
                     points: s.points.map(function (p) { return { x: p[0], y: p[1] }; }),
                     color: s.color || null
@@ -1808,6 +2293,7 @@
                         : "SEATED",
                     currency: item.currency || "JOD",
                     capacity: item.capacity != null ? Number(item.capacity) : null,
+                    serviceFeePerTicket: item.serviceFeePerTicket,
                     color: item.color || PALETTE[index % PALETTE.length],
                     shapeKind: item.shapeKind || "POLYGON",
                     points: (item.points || []).map(function (point) {
@@ -1830,8 +2316,17 @@
             refreshCommandState();
             notify();
             if (!(options && options.silent)) { markDirty(); }
+            return new Map(imported.map(function (section, index) { return [items[index].clientKey, section.key]; }));
+        },
+        translateSectionsX: function (dx) {
+            sections.forEach(function (section) {
+                section.points = section.points.map(function (point) {
+                    return [point[0] + dx, point[1]];
+                });
+            });
         },
         getBounds: function () {
+            if (!sections.some(function (section) { return section.points.length; })) { return null; }
             var box = selectionBounds(sections, [], []);
             return {
                 left: box.minX,
@@ -1852,6 +2347,25 @@
                     color: s.color, points: s.points.map(function (p) { return { x: p[0], y: p[1] }; })
                 };
             });
+        },
+        // Snapshot of the currently-selected section (the primary, if several are selected), or
+        // null when none. Used by hall-focus-mode.js to drive the right-side inspector.
+        getSelectedSection: function () {
+            if (!selected) { return null; }
+            var bb = bbox(selected.points);
+            return {
+                key: selected.key,
+                id: selected.id,
+                name: selected.name,
+                mode: selected.mode,
+                currency: selected.currency || null,
+                capacity: selected.mode === "GENERAL_ADMISSION" ? selected.capacity : null,
+                color: selected.color || null,
+                bbox: { minX: bb.minX, minY: bb.minY, maxX: bb.maxX, maxY: bb.maxY },
+                // Deep-cloned polygon vertices so the Section Edit view can clamp seats and
+                // generate seat grids that respect the section's actual shape (not just bbox).
+                points: selected.points.map(function (p) { return { x: p[0], y: p[1] }; })
+            };
         },
         // Lets the seat editor drop the section selection when a seat is plainly clicked, so the
         // two overlays are never both showing a selection.
@@ -1922,23 +2436,22 @@
         if (!window.HallSeatEditor || !window.HallSeatEditor.applySeatSectionPatch) { return false; }
         var state;
         try { state = window.HallSeatEditor.getState(); } catch (e) { return false; }
-        var seated = sections.filter(function (s) {
-            return s.mode === "SEATED" && s.points.length >= 3;
-        });
+        var seated = sections.filter(function (section) { return section.mode === "SEATED"; });
+        var byKey = new Map(seated.map(function (section) { return [section.key, section]; }));
         var patches = [];
-        (state.seats || []).forEach(function (seat) {
-            var cx = seat.x + seat.w / 2;
-            var cy = seat.y + seat.h / 2;
-            var match = null;
-            for (var i = 0; i < seated.length; i++) {
-                if (containsPoint(seated[i].points, cx, cy)) {
-                    match = seated[i];
-                    break;
-                }
+        state.seats.forEach(function (seat) {
+            var match = byKey.get(seat.sectionKey);
+            // Layout imports and pasted blocks can arrive without a section key.
+            if (seat.sectionKey == null) {
+                match = seated.find(function (section) {
+                    return containsPoint(section.points, seat.x + seat.w / 2, seat.y + seat.h / 2);
+                });
+                if (!match) { return; }
             }
-            var sectionName = match ? match.name : "";
-            if ((seat.section || "") !== sectionName) {
-                patches.push({ key: seat.key, section: sectionName });
+            var key = match ? match.key : "";
+            var name = match ? match.name : "";
+            if (seat.sectionKey !== key || seat.section !== name) {
+                patches.push({ key: seat.key, section: name, sectionKey: key });
             }
         });
         return patches.length
@@ -1959,6 +2472,7 @@
     function markDirty() {
         ensureSectionsFit(sections);
         syncSeatSections();
+        window.HallSeatEditor.validateSeatPlacements();
         var st = document.getElementById("layoutStatus");
         if (st) { st.textContent = "Unsaved changes"; st.className = "layout-status dirty"; }
         notify();

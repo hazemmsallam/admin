@@ -875,3 +875,473 @@ form.inline { display: inline; margin: 0; }
 @media (max-width: 900px) {
   .group-outliner { max-height: 200px; }
 }
+
+/* ======================================================================
+   Focus mode — Option A (Phase 1)
+   Section inspector slides over the right edge of the canvas when a
+   section is selected. Focus-mode bar appears at the top of the canvas
+   when the admin jumped into seat editing from a section.
+   ====================================================================== */
+
+.seat-canvas-shell { position: relative; }
+
+.focus-mode-bar {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px 6px 6px;
+  border-radius: 20px;
+  background: #fff;
+  border: 1px solid var(--line);
+  box-shadow: 0 2px 10px rgba(15,23,42,.08);
+  font-size: .82rem;
+  color: var(--ink);
+  z-index: 20;
+}
+.focus-mode-bar .focus-mode-text { color: var(--muted); }
+.focus-mode-bar .focus-mode-text strong { color: var(--ink); font-weight: 600; }
+.focus-mode-bar .focus-mode-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--accent, #2563eb);
+}
+.focus-back-btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 4px 10px 4px 8px;
+  border-radius: 14px;
+  background: var(--accent, #2563eb);
+  color: #fff;
+  border: 0;
+  font: inherit; font-size: .78rem; font-weight: 500;
+  cursor: pointer;
+}
+.focus-back-btn:hover { background: var(--accent-2, #1d4ed8); }
+.focus-back-btn:focus-visible { outline: 2px solid #93c5fd; outline-offset: 2px; }
+
+.focus-inspector {
+  position: absolute;
+  top: 12px; right: 12px; bottom: 12px;
+  width: 288px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 4px 18px rgba(15,23,42,.1);
+  z-index: 15;
+  display: flex; flex-direction: column;
+  overflow: hidden;
+  animation: focusInspectorIn 180ms ease-out;
+}
+@keyframes focusInspectorIn {
+  from { transform: translateX(12px); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+.focus-inspector-head {
+  padding: 14px 16px 12px;
+  border-bottom: 1px solid var(--line);
+  background: #fafbfd;
+}
+.focus-inspector-eyebrow {
+  display: block;
+  font-size: .64rem;
+  text-transform: uppercase;
+  letter-spacing: .1em;
+  color: var(--muted);
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+.focus-inspector-head h3 {
+  margin: 0;
+  font-size: 1.05rem;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+.focus-inspector-pill {
+  display: inline-block;
+  margin-top: 8px;
+  padding: 2px 9px;
+  border-radius: 10px;
+  font-size: .68rem;
+  font-weight: 700;
+  background: #e3ecfe;
+  color: #1d4ed8;
+}
+.focus-inspector-pill.ga { background: #fdf1e3; color: #b4530a; }
+.focus-inspector-body {
+  padding: 12px 16px 16px;
+  overflow-y: auto;
+  flex: 1;
+  display: flex; flex-direction: column; gap: 12px;
+}
+.focus-field { display: flex; flex-direction: column; gap: 3px; }
+.focus-field label {
+  font-size: .68rem; text-transform: uppercase; letter-spacing: .08em;
+  color: var(--muted); font-weight: 600;
+}
+.focus-value {
+  font-size: .9rem; color: var(--ink);
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.focus-swatch {
+  width: 14px; height: 14px; border-radius: 3px;
+  border: 1px solid rgba(0,0,0,.1);
+}
+.focus-stats {
+  display: grid; grid-template-columns: 1fr; gap: 8px;
+  padding: 10px 12px;
+  background: #fafbfd;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+}
+.focus-stat-label { font-size: .68rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.focus-stat-value { font-size: 1.1rem; font-weight: 700; color: var(--ink); }
+.focus-cta {
+  display: block; width: 100%;
+  margin-top: 6px;
+}
+.focus-ga-note {
+  margin: 4px 0 0;
+  font-size: .76rem; line-height: 1.5;
+}
+
+/* Hide the inspector on narrow screens — we can't float it comfortably. */
+@media (max-width: 900px) {
+  .focus-inspector { position: static; width: 100%; margin-top: 12px; }
+  .focus-mode-bar { position: static; margin: 0 auto 10px; transform: none; }
+}
+
+/* --- Phase 1.5: real zoom when editing seats inside a section ----------- */
+.canvas-zoom {
+  position: sticky;
+  top: 0;
+  left: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: max-content;
+  max-width: 100%;
+  padding: 6px;
+  margin-bottom: 8px;
+  background: var(--surface, #fff);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.canvas-zoom input { width: min(150px, 24vw); }
+.hall-page.is-section-focus .seat-canvas-shell { overflow: auto; }
+.hall-page.is-section-focus .canvas-zoom { top: 44px; }
+/* Dim everything OUTSIDE the focused section so the admin sees what they're editing. The
+   section-layout.js code tags each section polygon; we highlight the focused one by key. */
+.seat-canvas-shell.focus-zoomed .section-layer polygon { opacity: 0.25; transition: opacity 200ms; }
+.seat-canvas-shell.focus-zoomed .section-layer polygon.focus-target { opacity: 1; }
+
+/* In focus mode the inspector CTA becomes an exit button. */
+.focus-inspector .focus-cta.exit {
+  background: var(--surface, #fff);
+  color: var(--accent, #2563eb);
+  border: 1px solid var(--accent, #2563eb);
+}
+.focus-inspector .focus-cta.exit:hover { background: #eef5ff; }
+
+/* A tiny on-canvas hint while zoomed, so the user knows how to leave. */
+.focus-inspector .focus-hint {
+  margin-top: 8px;
+  padding: 8px 10px;
+  background: #f0f6ff;
+  border: 1px solid #c8dbff;
+  border-radius: 6px;
+  font-size: .76rem;
+  color: #1d4ed8;
+  line-height: 1.45;
+}
+
+/* ============================================================================
+ * Dedicated section-edit view (Phase 2).
+ *
+ * When the admin enters section-focus mode we add `.is-section-focus` to
+ * `.hall-page`. CSS then hides every surrounding chrome element and turns the
+ * canvas shell into a full-viewport Section Edit Canvas with its own toolbar.
+ *
+ * We don't restructure the DOM — the seat editor keeps operating on the same
+ * #seatCanvas it always did (so getBoundingClientRect, event wiring, coordinate
+ * math, keyboard shortcuts, etc. all keep working). Only visibility and layout
+ * change. Exit mode restores the page to normal.
+ * ============================================================================ */
+
+/* The "Seats" tab button is hidden by default — the admin only ever enters
+ * seat editing by focusing a specific section. (The Seats TAB PANELS are still
+ * togglable programmatically because `display: none` on a button doesn't stop
+ * .click() firing on it.) */
+.edit-tabs .edit-tab[data-tab="1"] { display: none !important; }
+
+/* When we're in section-focus mode, hide every chrome element on the page so
+ * only the dedicated section editor is visible. */
+.hall-page.is-section-focus > .page-head,
+.hall-page.is-section-focus > .card,
+.hall-page.is-section-focus .layout-panel > .layout-toolbar,
+.hall-page.is-section-focus .layout-panel > .layout-actions,
+.hall-page.is-section-focus .layout-panel > .edit-tabs,
+.hall-page.is-section-focus .layout-panel > .editor-command-bar,
+.hall-page.is-section-focus .layout-panel > .three-toolbar,
+.hall-page.is-section-focus .layout-panel > .group-outliner,
+.hall-page.is-section-focus .layout-panel > #sectionTools,
+.hall-page.is-section-focus .layout-panel > #tableTools,
+.hall-page.is-section-focus .layout-panel > #canvasSizeTools,
+.hall-page.is-section-focus .layout-panel > #sectionInspector,
+.hall-page.is-section-focus .layout-panel > #tableInspector,
+.hall-page.is-section-focus .layout-panel > #inspector,
+.hall-page.is-section-focus .layout-panel > #threeView {
+  display: none !important;
+}
+
+/* The page container and the layout panel both stretch so the Section Edit
+ * Canvas can take over the viewport. */
+.hall-page.is-section-focus {
+  max-width: none;
+  padding: 0;
+}
+.hall-page.is-section-focus .layout-panel {
+  margin: 0;
+  padding: 0;
+  background: #f4f6fb;
+  min-height: 100vh;
+  display: block;
+}
+
+/* The focus-mode bar becomes the page header of the dedicated view. It sits
+ * flush against the top with a thin shadow so it reads as a toolbar, not an
+ * overlay pill. */
+.hall-page.is-section-focus .focus-mode-bar {
+  position: sticky;
+  top: 0;
+  left: 0;
+  transform: none;
+  width: 100%;
+  margin: 0;
+  padding: 10px 24px;
+  border-radius: 0;
+  border-left: 0;
+  border-right: 0;
+  border-top: 0;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+  background: var(--surface, #fff);
+  z-index: 40;
+}
+
+/* The seat tools (+ Row / + Column / + Seat / Generate seats / Objects /
+ * Arrange) dock to a vertical LEFT sidebar so the canvas takes the full
+ * middle of the screen. The sidebar is one continuous scroll column holding
+ * every tool panel the admin needs while editing seats inside a section. */
+.hall-page.is-section-focus .section-edit-sidebar {
+  position: fixed;
+  left: 0;
+  top: 56px;
+  bottom: 0;
+  width: 220px;
+  z-index: 30;
+  background: var(--surface, #fff);
+  border-right: 1px solid var(--border, #e2e8f0);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+.hall-page.is-section-focus .section-edit-sidebar #layoutTools,
+.hall-page.is-section-focus .section-edit-sidebar #bulkGridTools,
+.hall-page.is-section-focus .section-edit-sidebar #tableTools,
+.hall-page.is-section-focus .section-edit-sidebar #arrangeTools {
+  display: flex !important;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  margin: 0;
+  padding: 12px;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--border, #e2e8f0);
+  position: static;
+  width: auto;
+  box-sizing: border-box;
+}
+.hall-page.is-section-focus .section-edit-sidebar #bulkGridTools,
+.hall-page.is-section-focus .section-edit-sidebar #tableTools,
+.hall-page.is-section-focus .section-edit-sidebar #arrangeTools {
+  background: #f8fafc;
+  font-size: .82rem;
+}
+/* Promote a visible panel heading from the aria-label of each panel so the
+ * sidebar reads as four labeled sections, not a wall of buttons. */
+.hall-page.is-section-focus .section-edit-sidebar [id="layoutTools"]::before    { content: "Seats";   }
+.hall-page.is-section-focus .section-edit-sidebar [id="bulkGridTools"]::before  { content: "Generate grid"; }
+.hall-page.is-section-focus .section-edit-sidebar [id="tableTools"]::before     { content: "Objects"; }
+.hall-page.is-section-focus .section-edit-sidebar [id="arrangeTools"]::before   { content: "Arrange"; }
+.hall-page.is-section-focus .section-edit-sidebar .section-autofit-tools {
+  display: flex !important;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding: 12px;
+  background: #eff6ff;
+  border-bottom: 1px solid var(--border, #e2e8f0);
+}
+.hall-page.is-section-focus .section-edit-sidebar .section-autofit-tools .section-autofit-label {
+  display: block;
+  font-size: .68rem;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: #1d4ed8;
+  font-weight: 700;
+}
+.hall-page.is-section-focus .section-edit-sidebar .section-autofit-note {
+  font-size: .68rem;
+  color: #1d4ed8;
+  line-height: 1.35;
+}
+.hall-page.is-section-focus .section-edit-sidebar #layoutTools::before,
+.hall-page.is-section-focus .section-edit-sidebar #bulkGridTools::before,
+.hall-page.is-section-focus .section-edit-sidebar #tableTools::before,
+.hall-page.is-section-focus .section-edit-sidebar #arrangeTools::before {
+  display: block;
+  font-size: .68rem;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--muted, #64748b);
+  margin-bottom: 4px;
+  font-weight: 700;
+}
+
+/* Inside the left sidebar every tool button, label, and input stacks and
+ * takes the full sidebar width. */
+.hall-page.is-section-focus .section-edit-sidebar button,
+.hall-page.is-section-focus .section-edit-sidebar input {
+  width: 100%;
+  box-sizing: border-box;
+}
+.hall-page.is-section-focus .section-edit-sidebar label.compact-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  font-size: .7rem;
+  color: var(--muted, #64748b);
+}
+.hall-page.is-section-focus .section-edit-sidebar .tools-sep { display: none; }
+.hall-page.is-section-focus .section-edit-sidebar .tools-label {
+  font-size: .72rem;
+  color: var(--muted, #64748b);
+  margin-top: 4px;
+}
+.hall-page.is-section-focus .section-edit-sidebar .tools-note {
+  font-size: .7rem;
+  color: var(--muted, #64748b);
+  line-height: 1.3;
+}
+.hall-page.is-section-focus .section-edit-sidebar .spacing-anchor {
+  display: flex;
+  gap: 4px;
+}
+.hall-page.is-section-focus .section-edit-sidebar .spacing-anchor button {
+  width: auto;
+  flex: 1;
+}
+
+/* Keep section-focus's dedicated-view visibility of the four panels even when
+ * the base .hidden or .tab-hidden class is still on them. */
+.hall-page.is-section-focus .section-edit-sidebar .layout-tools.hidden,
+.hall-page.is-section-focus .section-edit-sidebar .layout-tools.tab-hidden {
+  display: flex !important;
+}
+
+/* The canvas shell takes the middle — left-offset for the sidebar, right-offset
+ * for the inspector. Zero out the base padding and max-height so the canvas
+ * actually fills the dedicated area, and zero the canvas's own `margin: auto`
+ * so hall-focus-mode.js's translate math (which assumes the canvas starts at
+ * the shell's top-left) is correct. */
+.hall-page.is-section-focus .seat-canvas-shell {
+  margin: 0;
+  margin-left: 220px;
+  margin-right: 320px;
+  padding: 0;
+  border-radius: 0;
+  border: 0;
+  min-height: calc(100vh - 56px);
+  height: calc(100vh - 56px);
+  max-height: none;
+  background: #eef0f6;
+  overflow: auto;
+  position: relative;
+}
+.hall-page.is-section-focus .seat-canvas-shell .seat-canvas {
+  margin: 0;
+}
+
+/* The section polygon is read-only inside the Section Edit Canvas — it only
+ * marks the boundary. Every pointer interaction must fall through to seats
+ * and objects underneath, so no part of the section layer responds to the
+ * mouse here (not even vertex handles if section-layout.js tries to render
+ * them). */
+.hall-page.is-section-focus .section-layer,
+.hall-page.is-section-focus .section-layer *,
+.hall-page.is-section-focus .section-layer polygon,
+.hall-page.is-section-focus .section-layer .section-handle,
+.hall-page.is-section-focus .section-layer .vertex-handle {
+  pointer-events: none !important;
+  cursor: default !important;
+}
+
+/* Keep the focus-target polygon visually bright but non-interactive. */
+.hall-page.is-section-focus .section-layer polygon.focus-target {
+  cursor: default !important;
+}
+
+/* The inspector floats on the right as a side panel of the dedicated view. */
+.hall-page.is-section-focus .focus-inspector {
+  position: fixed;
+  top: 56px;
+  right: 0;
+  width: 300px;
+  height: calc(100vh - 56px);
+  margin: 0;
+  border-radius: 0;
+  border-right: 0;
+  border-top: 0;
+  border-bottom: 0;
+  z-index: 25;
+  box-shadow: -4px 0 12px rgba(15, 23, 42, 0.06);
+  overflow-y: auto;
+}
+
+/* The focus bar's "Back to hall" button grows a little so it reads as the
+ * primary way out of the dedicated view. */
+.hall-page.is-section-focus .focus-back-btn {
+  padding: 8px 18px;
+  font-size: .9rem;
+}
+
+/* Narrow screens: inspector drops below the canvas and tools wrap. */
+@media (max-width: 900px) {
+  .hall-page.is-section-focus #layoutTools,
+  .hall-page.is-section-focus #bulkGridTools {
+    position: static;
+    width: auto;
+    height: auto;
+    flex-direction: row;
+    flex-wrap: wrap;
+    border-right: 0;
+    border-bottom: 1px solid var(--border, #e2e8f0);
+  }
+  .hall-page.is-section-focus .seat-canvas-shell {
+    margin: 0;
+    height: auto;
+    min-height: 60vh;
+  }
+  .hall-page.is-section-focus .focus-inspector {
+    position: static;
+    width: auto;
+    height: auto;
+    margin: 12px;
+  }
+}
+
+.seat-chip.seat-placement-invalid { background: #a52332; outline: 2px solid #e23a4e; }

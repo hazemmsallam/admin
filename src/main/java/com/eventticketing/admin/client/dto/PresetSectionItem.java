@@ -1,5 +1,6 @@
 package com.eventticketing.admin.client.dto;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 /** One section inside a preset; {@code points} are relative to the preset's bounding box. */
@@ -10,6 +11,7 @@ public record PresetSectionItem(
         Integer capacity,
         String shapeKind,
         List<PointItem> points,
-        String color
+        String color,
+        BigDecimal serviceFeePerTicket
 ) {
 }

@@ -238,6 +238,16 @@
             <button type="button" id="btnSidesUp" class="btn secondary small" title="One more side">+</button>
             <button type="button" id="btnSectionStar" class="btn secondary small" title="Fold every side inward">Star</button>
             <span class="tools-sep"></span>
+            <span class="tools-label">Rotate section</span>
+            <button type="button" class="btn secondary small" data-section-rotation="90" disabled>90°</button>
+            <button type="button" class="btn secondary small" data-section-rotation="180" disabled>180°</button>
+            <button type="button" class="btn secondary small" data-section-rotation="270" disabled>270°</button>
+            <button type="button" class="btn secondary small" data-section-rotation="360" disabled>360°</button>
+            <span class="tools-sep"></span>
+            <span class="tools-label">Mirror section</span>
+            <button type="button" class="btn secondary small" data-section-mirror="horizontal" disabled>Left ↔ Right</button>
+            <button type="button" class="btn secondary small" data-section-mirror="vertical" disabled>Top ↔ Bottom</button>
+            <span class="tools-sep"></span>
             <button type="button" id="btnSectionDelete" class="btn danger small">Delete section(s)</button>
             <span class="muted tools-note">Sections define seated or general-admission booking areas.</span>
         </div>
@@ -257,6 +267,10 @@
             <div>
                 <label for="sxCurrency">Currency</label>
                 <input type="text" id="sxCurrency" maxlength="8" placeholder="JOD"/>
+            </div>
+            <div>
+                <label for="sxServiceFee">Service fee per ticket</label>
+                <input type="number" id="sxServiceFee" min="0" max="999999999.99" step="0.01" placeholder="1.00"/>
             </div>
             <div id="sxCapacityField" class="hidden">
                 <label for="sxCapacity">Capacity</label>
@@ -329,11 +343,11 @@
             </div>
             <div>
                 <label for="inWidth">Width (px)</label>
-                <input type="number" id="inWidth" min="12" max="120" step="1" value="42"/>
+                <input type="number" id="inWidth" min="4" max="120" step="1" value="42"/>
             </div>
             <div>
                 <label for="inHeight">Height (px)</label>
-                <input type="number" id="inHeight" min="12" max="120" step="1" value="38"/>
+                <input type="number" id="inHeight" min="4" max="120" step="1" value="38"/>
             </div>
         </div>
 
@@ -351,6 +365,63 @@
         </aside>
 
         <div class="seat-canvas-shell" id="planView" role="tabpanel" aria-labelledby="viewPlan">
+            <!-- Focus-mode bar: appears when the admin jumped from a section into the seat editor. -->
+            <div class="focus-mode-bar hidden" id="focusModeBar" aria-live="polite">
+                <button type="button" class="focus-back-btn" id="focusBack" title="Return to hall view">
+                    <span aria-hidden="true">←</span> Back to hall
+                </button>
+                <span class="focus-mode-text">
+                    Editing seats in <strong id="focusModeSection">Section</strong>
+                </span>
+                <span class="focus-mode-dot" aria-hidden="true"></span>
+            </div>
+
+            <!-- Section inspector: slides in when one section is selected in Sections mode. -->
+            <aside class="focus-inspector hidden" id="focusInspector" aria-label="Section inspector">
+                <header class="focus-inspector-head">
+                    <span class="focus-inspector-eyebrow">Section</span>
+                    <h3 id="insSectionName">—</h3>
+                    <span class="focus-inspector-pill" id="insModePill">● Seated</span>
+                </header>
+                <div class="focus-inspector-body">
+                    <div class="focus-field">
+                        <label>Mode</label>
+                        <div class="focus-value" id="insModeText">Seated</div>
+                    </div>
+                    <div class="focus-field" id="insCapacityField" hidden>
+                        <label>Capacity (GA)</label>
+                        <div class="focus-value" id="insCapacity">—</div>
+                    </div>
+                    <div class="focus-field" id="insColorField">
+                        <label>Color</label>
+                        <div class="focus-value">
+                            <span class="focus-swatch" id="insColorSwatch"></span>
+                            <span id="insColorHex">—</span>
+                        </div>
+                    </div>
+                    <div class="focus-stats" id="insSeatStats" hidden>
+                        <div class="focus-stat">
+                            <div class="focus-stat-label">Seats in section</div>
+                            <div class="focus-stat-value" id="insSeatCount">0</div>
+                        </div>
+                    </div>
+                    <button type="button" class="btn focus-cta" id="insEditSeats" hidden>
+                        Edit seats in this section →
+                    </button>
+                    <p class="muted focus-ga-note" id="insGaNote" hidden>
+                        General-admission sections have no individual seats.
+                        Capacity above is the total number of standing tickets that can be sold.
+                    </p>
+                </div>
+            </aside>
+
+            <div class="canvas-zoom" id="canvasZoomControls" role="group" aria-label="Canvas zoom">
+                <button type="button" class="btn secondary small" id="canvasZoomOut" aria-label="Zoom out">−</button>
+                <input type="range" id="canvasZoom" min="25" max="1000" step="1" value="100" aria-label="Zoom percentage">
+                <button type="button" class="btn secondary small" id="canvasZoomIn" aria-label="Zoom in">+</button>
+                <button type="button" class="btn secondary small" id="canvasZoomReset" aria-label="Reset zoom to 100%">100%</button>
+            </div>
+
             <div class="seat-canvas" id="seatCanvas"
                  th:attr="data-hall-id=${hall.id()}, data-w=${hall.layoutWidth()}, data-h=${hall.layoutHeight()},
                           data-seats-url=@{/halls/{id}/seats(id=${hall.id()})}, data-cols=${hall.numColumns()}">
@@ -359,7 +430,7 @@
                       class="seat-chip"
                       th:attr="data-id=${s.id()}, data-x=${s.layoutX()}, data-y=${s.layoutY()},
                                data-w=${s.layoutWidth()}, data-h=${s.layoutHeight()},
-                               data-rot=${s.rotationDegrees()}, data-section=${s.sectionName()},
+                               data-rot=${s.rotationDegrees()}, data-section=${s.sectionName()}, data-section-id=${s.sectionId()},
                                data-row=${s.rowIndex()}, data-col=${s.seatNumber()},
                                data-label=${s.label()}, data-rowlabel=${s.rowLabel()}"
                       th:title="${s.label()}"
@@ -392,8 +463,9 @@
 }
 </script>
 <script id="sectionsData" type="application/json" th:utext="${sectionsJson}">[]</script>
-<script th:src="@{/js/seat-layout.js(v=14)}"></script>
-<script th:src="@{/js/section-layout.js(v=13)}"></script>
+<script th:src="@{/js/seat-layout.js(v=27)}"></script>
+<script th:src="@{/js/section-layout.js(v=29)}"></script>
+<script th:src="@{/js/hall-focus-mode.js(v=13)}"></script>
 <script type="module" th:src="@{/js/hall-3d.js(v=8)}"></script>
 </body>
 </html>

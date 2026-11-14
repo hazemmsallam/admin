@@ -15,6 +15,7 @@ public record SeatEditItem(
         Integer rotationDegrees,
         Integer layoutWidth,
         Integer layoutHeight,
-        String sectionName
+        String sectionName,
+        String sectionKey
 ) {
 }
